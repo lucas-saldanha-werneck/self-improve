@@ -19,7 +19,7 @@ def test_launch_opens_with_name_and_prompt(env):
     log = fake_launcher(env)
     r = run(env, "launch", script=HR)
     assert f"review: opened {NAME} (3 items)" in r.stdout  # 2 open + 1 approved waiting
-    assert log.read_text().splitlines() == [".", "--tmux", "--name", NAME, "--prompt",
+    assert log.read_text(encoding="utf-8").splitlines() == [".", "--tmux", "--name", NAME, "--prompt",
                                             "/self-improve:human-review answer"]
 
 
@@ -27,7 +27,7 @@ def test_launch_exec_session(env):
     log = fake_launcher(env)
     r = run(env, "launch", "--exec", script=HR)
     assert f"exec: opened {EXEC_NAME} (1 items)" in r.stdout
-    assert log.read_text().splitlines()[-1] == "/self-improve:execute-reviewed"
+    assert log.read_text(encoding="utf-8").splitlines()[-1] == "/self-improve:execute-reviewed"
 
 
 def test_launch_without_launch_command_prints_how(env):
@@ -56,13 +56,13 @@ def test_launch_already_open(env):
 def test_launch_dry_run_passes_flag(env):
     log = fake_launcher(env)
     run(env, "launch", "--dry-run", script=HR)
-    assert log.read_text().splitlines()[-1] == "--dry-run"
+    assert log.read_text(encoding="utf-8").splitlines()[-1] == "--dry-run"
 
 
 def test_launch_failure_exits_nonzero(env):
     fake_launcher(env)
     bad = env["tmp"] / "bad-launcher.py"
-    bad.write_text("import sys\nsys.stderr.write('nope')\nsys.exit(3)\n")
+    bad.write_text("import sys\nsys.stderr.write('nope')\nsys.exit(3)\n", encoding="utf-8")
     env["env"]["SELF_IMPROVE_LAUNCH_COMMAND"] = f"{py_command(bad)} {{name}}"
     r = run(env, "launch", script=HR, ok=False)
     assert r.returncode == 1 and "review: failed to open" in r.stdout

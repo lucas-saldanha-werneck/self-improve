@@ -11,7 +11,7 @@ def ts(minutes_ago):
 def write_session(env, name, lines):
     d = env["claude"] / "projects" / "-home-me-project"
     d.mkdir(parents=True, exist_ok=True)
-    (d / f"{name}.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n")
+    (d / f"{name}.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
 
 
 def user(text, m, **kw):
@@ -46,12 +46,12 @@ def test_start_plain_install_reads_sessions(env):
     assert meta["sessions"] == 2 and meta["messages"] == 3 and meta["hints"] >= 1
     assert meta["wiki_enabled"] is False and meta["wiki_chunks"] == 0
     rd = last_run_dir(env)
-    chunk = (rd / "chunk-01.md").read_text()
+    chunk = (rd / "chunk-01.md").read_text(encoding="utf-8")
     assert "I told you to run the tests first" in chunk and "meta text" not in chunk
-    assert "2x in 2 sessions" in (rd / "repeats.md").read_text()
+    assert "2x in 2 sessions" in (rd / "repeats.md").read_text(encoding="utf-8")
     assert (env["state"] / "active-run.json").exists()
     # an empty plan still renders and closes; the lock goes away
-    (rd / "plan.json").write_text("[]")
+    (rd / "plan.json").write_text("[]", encoding="utf-8")
     run(env, "render", rd.name)
     out = run(env, "finish", rd.name).stdout
     assert "review: nothing pending" in out
@@ -73,19 +73,19 @@ def test_render_refuses_auto_on_skill_and_too_many_signoffs(env):
     rd = last_run_dir(env)
     skill = env["claude"] / "skills" / "demo" / "SKILL.md"
     skill.parent.mkdir(parents=True)
-    skill.write_text("---\nname: demo\ndescription: d\n---\n")
-    (rd / "plan.json").write_text(json.dumps([{"bucket": "auto", "kind": "typo", "title": "t", "target": str(skill)}]))
+    skill.write_text("---\nname: demo\ndescription: d\n---\n", encoding="utf-8")
+    (rd / "plan.json").write_text(json.dumps([{"bucket": "auto", "kind": "typo", "title": "t", "target": str(skill)}]), encoding="utf-8")
     r = run(env, "render", rd.name, ok=False)
     assert "never AUTO" in r.stderr
     many = [{"bucket": "signoff", "kind": "skill-edit", "title": f"t{i}", "target": str(skill)} for i in range(11)]
-    (rd / "plan.json").write_text(json.dumps(many))
+    (rd / "plan.json").write_text(json.dumps(many), encoding="utf-8")
     assert "the maximum is 10" in run(env, "render", rd.name, ok=False).stderr
     run(env, "abort", meta["run_id"])
 
 
 def test_wait_for_lock_exits_3(env):
     other = env["tmp"] / "other-job.lock"
-    other.write_text("{}")
+    other.write_text("{}", encoding="utf-8")
     env["env"]["SELF_IMPROVE_WAIT_FOR_LOCK"] = str(other)
     assert run(env, "start", ok=False).returncode == 3
 
@@ -100,4 +100,4 @@ def test_notify_runs_command(env):
     script.write_text(f"import sys\nopen({str(log)!r}, 'w', encoding='utf-8').write(sys.argv[1])\n")
     env["env"]["SELF_IMPROVE_NOTIFY_COMMAND"] = py_command(script)
     assert "notify: sent" in run(env, "notify", "hello there").stdout
-    assert log.read_text() == "hello there"
+    assert log.read_text(encoding="utf-8") == "hello there"

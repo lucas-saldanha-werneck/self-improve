@@ -27,7 +27,7 @@ def env(tmp_path):
     for d in (claude / "projects", claude / "skills", state / "runs" / "R0", out, wiki):
         d.mkdir(parents=True)
     target = tmp_path / "target.txt"
-    target.write_text("before\n")
+    target.write_text("before\n", encoding="utf-8")
     plan = [
         {"id": "S01", "bucket": "signoff", "kind": "skill-edit", "title": "change a", "target": str(target),
          "change": "replace before with after", "evidence": "3x", "risk": "low"},
@@ -36,11 +36,11 @@ def env(tmp_path):
          "options": ["A", "B"]},
         {"id": "C02", "bucket": "context", "kind": "gap", "title": "on purpose?", "question": "Is it on purpose?"},
     ]
-    (state / "runs" / "R0" / "plan.json").write_text(json.dumps(plan))
+    (state / "runs" / "R0" / "plan.json").write_text(json.dumps(plan), encoding="utf-8")
     hist = [{"event": "start", "run_id": "R0", "covered_from": "2026-09-13T00:00:00Z",
              "covered_until": "2026-09-20T00:00:00Z"},
             {"event": "finish", "run_id": "R0", "consumed": []}]
-    (state / "history.jsonl").write_text("\n".join(json.dumps(h) for h in hist) + "\n")
+    (state / "history.jsonl").write_text("\n".join(json.dumps(h) for h in hist) + "\n", encoding="utf-8")
     (out / "review-2026-09-20.md").write_text(textwrap.dedent("""\
         # improve-system review, 2026-09-20
 
@@ -50,7 +50,7 @@ def env(tmp_path):
             - Where: `target.txt` (skill-edit)
         - [ ] **S02 · change b** <!-- R0/S02 -->
             - Where: `target.txt` (skill-edit)
-        """))
+        """), encoding="utf-8")
     (out / "needs-context-2026-09-20.md").write_text(textwrap.dedent("""\
         # Context needed, 2026-09-20
 
@@ -69,7 +69,7 @@ def env(tmp_path):
         **Answer:**
 
         ---
-        """))
+        """), encoding="utf-8")
     home = tmp_path / "home"
     home.mkdir()
     e = minimal_env(home)

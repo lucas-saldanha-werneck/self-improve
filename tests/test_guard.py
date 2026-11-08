@@ -18,15 +18,15 @@ def hook(env, tool, tool_input, cwd=None):
 def lock(env, allowed=(), age_s=0):
     rd = env["state"] / "runs" / "RX"
     rd.mkdir(parents=True, exist_ok=True)
-    (rd / "allowed-paths.txt").write_text("".join(os.path.realpath(p) + "\n" for p in allowed))
+    (rd / "allowed-paths.txt").write_text("".join(os.path.realpath(p) + "\n" for p in allowed), encoding="utf-8")
     (env["state"] / "active-run.json").write_text(json.dumps(
-        {"run_id": "RX", "run_dir": str(rd), "started_epoch": time.time() - age_s}))
+        {"run_id": "RX", "run_dir": str(rd), "started_epoch": time.time() - age_s}), encoding="utf-8")
 
 
 def skill_file(env):
     p = env["claude"] / "skills" / "demo" / "SKILL.md"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text("---\nname: demo\ndescription: demo\n---\n")
+    p.write_text("---\nname: demo\ndescription: demo\n---\n", encoding="utf-8")
     return str(p)
 
 
@@ -92,11 +92,11 @@ def test_claude_can_abort_old_run(env):
 
 
 def test_unreadable_lock_blocks(env):
-    (env["state"] / "active-run.json").write_text("{not json")
+    (env["state"] / "active-run.json").write_text("{not json", encoding="utf-8")
     assert hook(env, "Write", {"file_path": skill_file(env), "content": "x"})
 
 
 def test_start_records_session(env):
     hook(env, "Bash", {"command": f"python3 {IS} start"})
-    s = json.loads((env["state"] / "starting-session.json").read_text())
+    s = json.loads((env["state"] / "starting-session.json").read_text(encoding="utf-8"))
     assert s["session_id"] == "test"

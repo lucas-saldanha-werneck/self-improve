@@ -1232,12 +1232,16 @@ def cmd_apply_patch(a):
         sys.exit(f"{short(target)} is not released in this run")
     # newline="": keep the file's own line endings (Windows would turn \n into \r\n on write)
     text = open(target, encoding="utf-8", newline="").read() if os.path.isfile(target) else None
-    n = text.count(patch["old"]) if text is not None else 0
+    old, new = patch["old"], patch["new"]
+    if text is not None and "\r\n" in text and "\r" not in old and old not in text:
+        # a CRLF file (common on Windows) and a patch written with \n: match it in the file's own line endings
+        old, new = old.replace("\n", "\r\n"), new.replace("\r\n", "\n").replace("\n", "\r\n")
+    n = text.count(old) if text is not None else 0
     if n != 1:
         print(f"{key}: the 'old' text appears {n} time(s) in {short(target)}. The target changed; nothing was touched",
               file=sys.stderr)
         sys.exit(4)
-    new_text = text.replace(patch["old"], patch["new"], 1)
+    new_text = text.replace(old, new, 1)
     bad = invalid_config(target, text, new_text)
     if bad:
         sys.exit(f"{key}: the patched {short(target)} would be invalid ({bad}). Nothing was touched")
