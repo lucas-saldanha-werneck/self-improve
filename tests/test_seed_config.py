@@ -86,6 +86,15 @@ def test_env_overrides_are_respected(home):
     assert read(home["tmp"] / "home" / ".claude" / "self-improve" / "config.json") == read(EXAMPLE)
 
 
+def test_relative_home_is_not_seeded_into_the_project(home):
+    proj = home["tmp"] / "project"
+    proj.mkdir()
+    r = subprocess.run([sys.executable, SEED], capture_output=True, text=True, cwd=str(proj),
+                       env=dict(home["env"], SELF_IMPROVE_HOME="rel-state"))
+    assert r.returncode == 0
+    assert os.listdir(proj) == []
+
+
 def test_unwritable_place_never_crashes(home):
     blocker = home["tmp"] / "a-file"
     blocker.write_text("x")

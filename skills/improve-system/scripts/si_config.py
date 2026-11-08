@@ -67,7 +67,7 @@ def seed_config():
     Run by the SessionStart hook (seed_config.py) and by improve_system.py, since installing a plugin
     runs no hook."""
     try:
-        if os.path.lexists(CONFIG_FILE):
+        if not os.path.isabs(CONFIG_FILE) or os.path.lexists(CONFIG_FILE):  # relative = the project folder
             return False
         with open(EXAMPLE_CONFIG, "rb") as f:
             data = f.read()
