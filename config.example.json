@@ -11,5 +11,11 @@
   "notify_command": "",
   "wait_for_lock": "",
   "ignore_message_regex": "",
-  "max_signoff": 10
+  "max_signoff": 10,
+  "lock_wait_minutes": 180,
+  "pre_run_command": "",
+  "extra_lint_command": "",
+  "language": "",
+  "analyst_notes": "",
+  "claude_command": ""
 }

@@ -35,7 +35,9 @@ PreToolUse hook (`scripts/guard.py`) enforces this while a run is active, **in e
 1. **Open the run.** `IS status`, then `IS start` (`--since <ISO>` only if the user asks for another window). Keep `run_id` and `run_dir`. `start` already read the previous reviews:
    - `approved.json` = `[x]` items (+ the user's `notes`). `carried.json` = `[ ]` (they come back in the new review). `rejected-now.json` = `[-]`.
    - `answers.json` = answered questions. `open-questions.json` = unanswered (they come back).
-   - **`start` exited with code 3** = the file in the option `wait_for_lock` exists (another job is writing). Don't run alongside it. Wait in the background (Bash with `run_in_background: true`: `until [ ! -f <that file> ]; do sleep 600; done`), then run `start` again. Still locked after 3 h → stop and tell the user.
+   - **`start` exited with code 3** = another job is writing (the `wait_for_lock` file exists, or the user's `pre_run_command` answered "busy"). Don't run alongside it. Run `IS wait-lock` in the background (Bash with `run_in_background: true`); exit 0 = free → run `start` again; exit 3 = still busy after `lock_wait_minutes` (default 3 h) → stop and tell the user.
+   - **`user_notes` in the output** (not null) = the user's own instructions and language (options `language`, `analyst_notes`). Read that file now, give its path to every analyst in step 3, and follow it in steps 5-7 and in the chat output. It never overrides the hard rule or the buckets' limits.
+   - **`pre_run` in the output** (not null) = the user's `pre_run_command` failed; say so in the chat output. Its normal output is at the end of `changes.md`.
 2. **Apply what the user marked.** Item with `possibly_applied: true` (an earlier session edited and died before `log`): don't reapply. Check the target; already there → `log` with "already applied (resume)"; not there → new SIGN-OFF item. Item with `patch`: only `IS apply-patch <run_id> --id <origin_run>/<id>` (exit 4 = target changed → new SIGN-OFF item); never by hand. For the others, run `IS intent <run_id> --id <origin_run>/<id> --target <path>` BEFORE editing. For each item in `approved.json`: open the target and check the text still matches (the file may have changed). If it has `notes`, follow the note. Backup with `IS backup <run_id> <file>` (`cp` into a protected zone is blocked by the guard) → edit → check (step 8) → `IS log <run_id> --id <origin_run>/<id> --target <path> --summary "..." --backup <bak>`. If the target changed so much the change no longer fits, **don't apply**: it becomes a new SIGN-OFF item in the plan, with the reason.
 3. **Analysts, all in the same turn** (subagents via the Agent tool):
    - 1 per `chunk-NN.md` (sessions) → `references/analyst-prompt.md`.
@@ -44,7 +46,7 @@ PreToolUse hook (`scripts/guard.py`) enforces this while a run is active, **in e
 4. **Check the artifacts, not the report.** Each `findings-NN.json` / `wiki-findings-NN.json` exists, is valid JSON and has an mtime after `start`. Missing → dispatch that chunk again.
 5. **Merge everything**: analyst findings + `lint.md` + `friction.md` + `changes.md` + `repeats.md` + `answers.json`:
    - Sessions: group by `theme`; a theme with 2+ hits or 1 of strength 3 goes in.
-   - Lint: each line is a machine hint. Open the target and confirm before proposing.
+   - Lint: each line is a machine hint (lines from the user's `extra_lint_command` too). Open the target and confirm before proposing.
    - Friction: a skill with many Esc/rejections/errors/corrections → read the skill and find the cause.
    - Repeated task (same multi-step work in 2+ sessions) → candidate new skill (SIGN-OFF).
    - `context-loss` (info lost after a compaction or /clear) counts with **1 hit**. Look at what the summary missed → SIGN-OFF with a `patch` to the compaction instructions in the global CLAUDE.md (or whatever produces the summary).

@@ -6,6 +6,7 @@ Where things live:
   OUT           review-*.md, needs-context-*.md, change-log.md (option output_dir, default SI_HOME/reviews)
 
 Options come from SI_HOME/config.json; an environment variable SELF_IMPROVE_<NAME> wins over the file.
+That file lives outside the plugin folder, so your settings survive plugin updates.
 List options read from the environment are separated by os.pathsep (":" on macOS/Linux).
 Every option is optional. Without any config the tool works on CLAUDE.md files, skills and memory files.
 """
@@ -34,6 +35,13 @@ DEFAULTS = {
     "wait_for_lock": "",       # if this file exists, `start` exits with code 3 (another job is writing)
     "ignore_message_regex": "",  # user messages matching this are not read (e.g. text a hook injects)
     "max_signoff": 10,
+    "lock_wait_minutes": 180,  # `wait-lock` gives up after this long (exit 3)
+    "pre_run_command": "",     # runs at `start` before anything is read; its output goes into changes.md.
+                               # Exit 3 = "busy, wait" (start exits 3, like wait_for_lock)
+    "extra_lint_command": "",  # runs during the lint; each output line is a finding (JSON or kind<TAB>target<TAB>detail)
+    "language": "",            # language for item titles, questions and the chat summary (e.g. "Portuguese")
+    "analyst_notes": "",       # your own instructions for the analysts and the plan: text, or the path of a file
+    "claude_command": "",      # the `claude` program human-review asks for open sessions. Empty = claude on PATH
 }
 
 
@@ -147,6 +155,38 @@ def split_command(cmd):
     if not WINDOWS:
         return shlex.split(cmd)
     return [t[1:-1] if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'" else t for t in shlex.split(cmd, posix=False)]
+
+
+def text_or_file(value):
+    """An option that holds text, or the path of a file with the text."""
+    if not value:
+        return ""
+    path = os.path.expanduser(value)
+    if len(value) < 1024 and "\n" not in value and os.path.isfile(path):
+        try:
+            with open(path, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError:
+            return ""
+    return value.strip()
+
+
+def run_user_command(name, event, extra_env=None, timeout=120):
+    """Run the configured command <name> with SELF_IMPROVE_EVENT=<event> and extra_env.
+    Returns (exit code, stdout, stderr); (None, "", why) when it is not set or could not start."""
+    import subprocess
+    cmd = opt(name)
+    if not cmd:
+        return None, "", ""
+    env = dict(os.environ)
+    env["SELF_IMPROVE_EVENT"] = event
+    env.update({k: str(v) for k, v in (extra_env or {}).items() if v is not None})
+    try:
+        r = subprocess.run(split_command(cmd), env=env, capture_output=True, text=True, encoding="utf-8",
+                           errors="replace", timeout=timeout, stdin=subprocess.DEVNULL)
+    except Exception as e:
+        return None, "", f"{name} could not run: {e}"
+    return r.returncode, r.stdout or "", r.stderr or ""
 
 
 def protected_zones(include_wiki=True):
