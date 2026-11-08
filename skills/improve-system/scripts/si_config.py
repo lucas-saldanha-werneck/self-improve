@@ -6,7 +6,8 @@ Where things live:
   OUT           review-*.md, needs-context-*.md, change-log.md (option output_dir, default SI_HOME/reviews)
 
 Options come from SI_HOME/config.json; an environment variable SELF_IMPROVE_<NAME> wins over the file.
-That file lives outside the plugin folder, so your settings survive plugin updates.
+That file lives outside the plugin folder, so your settings survive plugin updates. seed_config() creates
+it from config.example.json on first run (every option at its default); an existing file is never touched.
 List options read from the environment are separated by os.pathsep (":" on macOS/Linux).
 Every option is optional. Without any config the tool works on CLAUDE.md files, skills and memory files.
 """
@@ -19,6 +20,9 @@ HOME = os.path.expanduser("~")
 CLAUDE_HOME = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"))
 SI_HOME = os.path.expanduser(os.environ.get("SELF_IMPROVE_HOME") or os.path.join(CLAUDE_HOME, "self-improve"))
 CONFIG_FILE = os.path.join(SI_HOME, "config.json")
+# Starter copied to CONFIG_FILE on first run: every option at its default (same behavior as no file).
+EXAMPLE_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
+    os.path.abspath(__file__))))), "config.example.json")
 
 DEFAULTS = {
     "output_dir": "",          # empty = SI_HOME/reviews
@@ -55,6 +59,32 @@ def _load_file():
 
 
 _FILE = _load_file()
+
+
+def seed_config():
+    """Create CONFIG_FILE from config.example.json if it does not exist yet. Never overwrites or changes
+    an existing file (O_EXCL), never raises, prints nothing. True if it created the file.
+    Run by the SessionStart hook (seed_config.py) and by improve_system.py, since installing a plugin
+    runs no hook."""
+    try:
+        if os.path.lexists(CONFIG_FILE):
+            return False
+        with open(EXAMPLE_CONFIG, "rb") as f:
+            data = f.read()
+        os.makedirs(os.path.dirname(CONFIG_FILE) or ".", exist_ok=True)
+        fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+    except Exception:
+        return False
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        return True
+    except Exception:
+        try:  # only the half-written file this call just created
+            os.remove(CONFIG_FILE)
+        except Exception:
+            pass
+        return False
 
 
 def opt(name):

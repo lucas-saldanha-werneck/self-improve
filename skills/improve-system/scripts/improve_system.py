@@ -1582,6 +1582,7 @@ def cmd_status(a):
 
 
 def main():
+    C.seed_config()  # first use: create SI_HOME/config.json if missing (never overwrites)
     p = argparse.ArgumentParser(description="improve-system (self-improve plugin)")
     sp = p.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("start")

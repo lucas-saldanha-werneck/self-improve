@@ -68,9 +68,13 @@ python3 ~/.claude/plugins/cache/self-improve/self-improve/0.2.0/skills/improve-s
 
 ## Configuration
 
-Everything works without configuration. To change something, create `~/.claude/self-improve/config.json` (a full example is in `config.example.json`). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
+Everything works without configuration. To change something, edit `~/.claude/self-improve/config.json` (see *Your settings* below). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
 
 **Your settings survive plugin updates.** The config file, the run state and the reviews live in `~/.claude/self-improve/`, outside the plugin folder that an update replaces. Personal behavior goes in small scripts you point the `*_command` options at, not in the plugin's code.
+
+### Your settings
+
+Your file is `~/.claude/self-improve/config.json` (inside `$SELF_IMPROVE_HOME` if you set it; `$CLAUDE_CONFIG_DIR` replaces `~/.claude`; on Windows `~` is `%USERPROFILE%`). You don't have to create it: the plugin writes it the first time a session starts (or the first time `improve_system.py` runs), from [`config.example.json`](config.example.json), with every option at its default and a one-line note per option under `_doc`. That file behaves exactly like having no file. Plugin updates never touch it, and an existing file is never overwritten, so edit it freely.
 
 | Key | Default | What it does |
 |---|---|---|
