@@ -68,7 +68,13 @@ python3 ~/.claude/plugins/cache/self-improve/self-improve/0.2.0/skills/improve-s
 
 ## Configuration
 
-Everything works without configuration. To change something, create `~/.claude/self-improve/config.json` (a full example is in `config.example.json`). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
+Everything works without configuration. To change something, edit `~/.config/self-improve/config.json` (see *Your settings* below). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
+
+**Your settings survive plugin updates.** The config file lives in `~/.config/self-improve/`, and the run state and the reviews in `~/.claude/self-improve/`, both outside the plugin folder that an update replaces. Personal behavior goes in small scripts you point the `*_command` options at, not in the plugin's code.
+
+### Your settings
+
+Your file is `~/.config/self-improve/config.json` (`$XDG_CONFIG_HOME/self-improve/config.json` when `XDG_CONFIG_HOME` is set; `$SELF_IMPROVE_HOME/config.json` if you set `SELF_IMPROVE_HOME`; on Windows `~` is `%USERPROFILE%`). Older versions kept it in `~/.claude/self-improve/config.json` (`$CLAUDE_CONFIG_DIR` replaces `~/.claude`): while the new file does not exist, that old file is still read and nothing new is created next to it; once the new file exists, it wins. Move the old file to the new place whenever you like. You don't have to create it: the plugin writes it the first time a session starts (or the first time `improve_system.py` runs), from [`config.example.json`](config.example.json), with every option set to `null` and a one-line note per option under `_doc`. `null` means "use the built-in default" (the table below), so that file behaves exactly like having no file, and a later version that changes a default reaches you too. Replace a `null` to change that setting. Plugin updates never touch it, and an existing file is never overwritten, so edit it freely.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -82,11 +88,26 @@ Everything works without configuration. To change something, create `~/.claude/s
 | `allow_inline_code` | `0` | `1` lets `python3 -c`, `node -e` and heredocs into interpreters run during a run, unless their text names a protected path |
 | `launch_command` | (off) | Opens the review and apply steps in a separate session (see below) |
 | `notify_command` | (off) | Program called with one line of text at the end of a step |
-| `wait_for_lock` | (off) | If this file exists, a run refuses to start (exit code 3), so it doesn't overlap another job |
+| `wait_for_lock` | (off) | If this file exists, a run refuses to start (exit code 3), so it doesn't overlap another job. `wait-lock` waits for it |
+| `lock_wait_minutes` | `180` | How long `wait-lock` waits before it gives up (exit 3) |
+| `pre_run_command` | (off) | Runs at the start of every run, before anything is read (see below). Its output goes into `changes.md`; exit 3 = "busy, wait" |
+| `extra_lint_command` | (off) | Runs during the lint; each line it prints is one more finding (see below) |
+| `language` | (off) | Language for item titles, questions, evidence and the chat summary (for example `Portuguese`). Keys, kinds and buckets stay in English |
+| `analyst_notes` | (off) | Your own rules for the analysts and the plan, as text or the path of a file. Written to `user-notes.md` in the run folder; the skills read it and follow it, but it never overrides the guard or the bucket limits |
+| `claude_command` | `claude` on `PATH` | The `claude` program asked for open sessions (`claude agents --json`) before a launch, for example a pinned copy |
 | `ignore_message_regex` | (off) | Your messages that match are not read (for example text a hook types for you) |
 | `max_signoff` | `10` | New SIGN-OFF items per run |
 
-`SELF_IMPROVE_HOME` moves the whole state folder (default `~/.claude/self-improve`). `CLAUDE_CONFIG_DIR` is respected for where sessions, skills and config are read.
+`SELF_IMPROVE_HOME` moves the whole state folder (default `~/.claude/self-improve`), and the config file with it. `CLAUDE_CONFIG_DIR` is respected for where sessions, skills and Claude Code's own config are read.
+
+### Commands you plug in
+
+Both are split like a shell line (no shell runs them; put pipes in a script), get `SELF_IMPROVE_EVENT`, and never stop a run by failing:
+
+- `pre_run_command` gets `SELF_IMPROVE_MODE` (`full`, `apply-only`, or `check` when `wait-lock` asks), `SELF_IMPROVE_SINCE` and `SELF_IMPROVE_UNTIL` (the run's window, ISO UTC), `SELF_IMPROVE_WIKI_DIR`, `SELF_IMPROVE_RAW_DIR`. Exit 0: what it prints is added to `changes.md` (for example "the data jobs that ran in this window"). Exit 3: another job is busy, so `start` exits 3 and the skill waits with `wait-lock`. Any other exit: the run goes on and the chat output mentions it. Keep it quick and safe to run several times.
+- `extra_lint_command` gets `SELF_IMPROVE_WIKI_DIR` and `SELF_IMPROVE_RAW_DIR`. Print one finding per line, either JSON `{"kind": "...", "target": "/abs/path", "detail": "...", "auto_ok": false}` or `kind<TAB>target<TAB>detail`. Findings are hints the run checks before proposing; `auto_ok` defaults to false, and AUTO stays limited to the kinds in `references/buckets.md`. A failing command becomes one `extra-lint-failed` finding.
+
+`improve_system.py wait-lock [--max-minutes N] [--every S]` blocks until `start` may run: the `wait_for_lock` file is gone and `pre_run_command` (in `check` mode) no longer answers 3. Exit 0 = go, 3 = gave up.
 
 ## Optional requirements
 
@@ -118,7 +139,7 @@ claude plugin uninstall self-improve@self-improve
 claude plugin marketplace remove self-improve
 ```
 
-Your reviews, change log, backups and run history stay in `~/.claude/self-improve`. Delete that folder if you don't want them. If you uninstall during a run, the lock file stays there too, but with the plugin gone there is no hook to enforce it.
+Your reviews, change log, backups and run history stay in `~/.claude/self-improve`, and your settings in `~/.config/self-improve`. Delete those folders if you don't want them. If you uninstall during a run, the lock file stays there too, but with the plugin gone there is no hook to enforce it.
 
 ## Limits
 

@@ -16,7 +16,8 @@ may run with nobody watching: it does not ask, does not widen the scope, and app
 
 1. `HR items`. `approved` = 0 → do nothing; reply "nothing approved to apply" and stop.
 2. `IS start --apply-only`. Keep `run_id` and `run_dir`.
-   - **Exited with code 3** = the `wait_for_lock` file exists (another job is writing). Wait in the background (`until [ ! -f <that file> ]; do sleep 600; done` with `run_in_background: true`), then run `start --apply-only` again. Still locked after 3 h → `IS notify "execute-reviewed stopped: another job is still running"` and stop.
+   - **Exited with code 3** = another job is writing (the `wait_for_lock` file exists, or `pre_run_command` answered "busy"). Run `IS wait-lock` in the background (`run_in_background: true`); exit 0 → run `start --apply-only` again; exit 3 (still busy after `lock_wait_minutes`) → `IS notify "execute-reviewed stopped: another job is still running"` and stop.
+   - `user_notes` in the output (not null) → read it and follow it (language, the user's own rules) while you apply; it never widens the scope.
    - **Refused because an improve-system run is active** (guard lock) → don't force it: `IS notify "execute-reviewed postponed: run <id> is active; the next improve-system run applies the [x] items"` and stop.
 3. For each item in `<run_dir>/approved.json` (in order):
    - **`possibly_applied: true`** (an earlier run recorded the intent, the target changed and there was no `log`: the session died halfway): **don't apply again.** Open the target: the change is already there → `IS log` with `--summary "already applied (resume)"`; it isn't → treat as step 3.5.

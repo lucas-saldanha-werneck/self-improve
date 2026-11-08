@@ -21,6 +21,9 @@ Subcommands:
                                  launches the human-review session if something waits for you
   abort  RUN_ID [--note TXT]     abandoned run: releases the lock, window and reviews stay as they were
   notify TEXT                    sends one line through notify_command (no-op when not configured)
+  wait-lock [--max-minutes N] [--every S]
+                                 blocks until `start` may run: the wait_for_lock file is gone and
+                                 pre_run_command no longer answers 3 (busy). Exit 0 = go, 3 = gave up
 
 State lives outside the plugin (see si_config.py): SI_HOME/history.jsonl, SI_HOME/runs/<RUN_ID>/,
 SI_HOME/active-run.json (the lock guard.py reads). Your files: OUT/review-*, needs-context-*, change-log.md.
@@ -571,7 +574,35 @@ def lint(skill_stats_30d):
             add("memory-index", idxp, f"points to {f}, which does not exist")
         for f in sorted(files - linked):
             add("memory-index", idxp, f"{f} has no line in the index")
+    extra_lint(add)
     return items
+
+
+def extra_lint(add):
+    """Findings from the user's extra_lint_command: one per output line, as JSON
+    {"kind", "target", "detail", "auto_ok"?} or as kind<TAB>target<TAB>detail. auto_ok defaults to false."""
+    rc, out, err = C.run_user_command("extra_lint_command", "lint", {"SELF_IMPROVE_WIKI_DIR": WIKI,
+                                                                    "SELF_IMPROVE_RAW_DIR": RAW})
+    if rc is None and not err:
+        return
+    if rc != 0:
+        add("extra-lint-failed", C.opt("extra_lint_command"),
+            f"extra_lint_command failed ({err.strip()[:200] or 'exit ' + str(rc)})", auto_ok=False)
+        return
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            d = json.loads(line) if line.startswith("{") else None
+        except ValueError:
+            d = None
+        if isinstance(d, dict) and d.get("kind") and d.get("target"):
+            add(str(d["kind"]), str(d["target"]), str(d.get("detail") or ""), auto_ok=d.get("auto_ok") is True)
+            continue
+        parts = line.split("\t")
+        if len(parts) >= 3 and parts[0] and parts[1]:
+            add(parts[0], parts[1], "\t".join(parts[2:]), auto_ok=False)
 
 
 # ---------- previous reviews ----------
@@ -764,6 +795,64 @@ def write_lock(run_id, rd):
     return sess
 
 
+def pre_run(mode, since, until):
+    """The user's pre_run_command. {"code": exit code or None, "output": text for changes.md, "note": status}."""
+    rc, out, err = C.run_user_command("pre_run_command", "pre_run", {
+        "SELF_IMPROVE_MODE": mode, "SELF_IMPROVE_SINCE": iso(since) if since else "",
+        "SELF_IMPROVE_UNTIL": iso(until) if until else "", "SELF_IMPROVE_WIKI_DIR": WIKI,
+        "SELF_IMPROVE_RAW_DIR": RAW})
+    if rc is None:
+        return {"code": None, "output": "", "note": err.strip()}
+    if rc == 0:
+        return {"code": 0, "output": out.strip(), "note": ""}
+    note = (err.strip() or out.strip())[:200]
+    return {"code": rc, "output": "", "note": f"exit {rc}" + (f": {note}" if note else "")}
+
+
+def write_user_notes(rd):
+    """language + analyst_notes -> <run_dir>/user-notes.md for the analysts and the plan. Path, or None."""
+    lang = C.opt("language")
+    notes = C.text_or_file(C.opt("analyst_notes"))
+    if not lang and not notes:
+        return None
+    parts = ["# Notes from the user's self-improve config (follow them)\n"]
+    if lang:
+        parts.append(f"Language: write titles, evidence, questions, options and the chat summary in {lang}. "
+                     "Keep the JSON keys, bucket names and kinds in English.\n")
+    if notes:
+        parts.append(notes + "\n")
+    path = os.path.join(rd, "user-notes.md")
+    with open(path, "w", encoding="utf-8") as fo:
+        fo.write("\n".join(parts))
+    return path
+
+
+def lock_busy():
+    """Why `start` would exit 3 right now, or ""."""
+    if WAIT_LOCK and os.path.exists(WAIT_LOCK):
+        return f"{WAIT_LOCK} exists"
+    # the same variables as a real run (no window yet), so a command that reads them doesn't crash here
+    rc, out, err = C.run_user_command("pre_run_command", "pre_run", {
+        "SELF_IMPROVE_MODE": "check", "SELF_IMPROVE_SINCE": "", "SELF_IMPROVE_UNTIL": "",
+        "SELF_IMPROVE_WIKI_DIR": WIKI, "SELF_IMPROVE_RAW_DIR": RAW})
+    if rc == 3:
+        return "pre_run_command answered 3 (busy)"
+    return ""
+
+
+def cmd_wait_lock(a):
+    limit = time.time() + 60 * (a.max_minutes if a.max_minutes is not None else C.opt("lock_wait_minutes"))
+    while True:
+        why = lock_busy()
+        if not why:
+            print("wait-lock: free, run `start`")
+            return
+        if time.time() >= limit:
+            print(f"wait-lock: still busy ({why}); gave up", file=sys.stderr)
+            sys.exit(3)
+        time.sleep(max(1, min(a.every, limit - time.time())))
+
+
 def cmd_start(a):
     hist = read_history()
     # another job (option wait_for_lock) still writing: wait, don't run alongside it
@@ -771,6 +860,7 @@ def cmd_start(a):
         print(f"{WAIT_LOCK} exists (another job is running): wait for it to finish and run `start` again",
               file=sys.stderr)
         sys.exit(3)
+    lk = None
     if os.path.exists(LOCK):
         try:
             lk = json.load(open(LOCK, encoding="utf-8"))
@@ -779,7 +869,6 @@ def cmd_start(a):
         if not a.force:
             sys.exit(f"run {lk.get('run_id')} is already active. Close it with `finish {lk.get('run_id')}` "
                      f"or `abort {lk.get('run_id')}` (the lock never expires by itself)")
-        do_abort(lk.get("run_id", "?"), "replaced by --force")
     until = now_utc()
     prev = last_finished(hist)
     if a.since:
@@ -790,6 +879,13 @@ def cmd_start(a):
         since = parse_ts(prev["covered_until"])
     else:
         since = until - timedelta(days=a.days)
+    pre = pre_run("apply-only" if a.apply_only else "full", since, until)
+    if pre["code"] == 3:
+        print(f"pre_run_command says another job is busy ({pre['note'] or 'exit 3'}): run `wait-lock`, "
+              "then `start` again", file=sys.stderr)
+        sys.exit(3)  # before --force touches the active run: a busy answer leaves it as it was
+    if lk is not None:
+        do_abort(lk.get("run_id", "?"), "replaced by --force")
     base_id = until.astimezone().strftime("%Y%m%d-%H%M%S")
     os.makedirs(os.path.join(STATE, "runs"), exist_ok=True)
     for n in range(100):  # exclusive mkdir: two starts in the same second don't share a folder
@@ -816,6 +912,10 @@ def cmd_start(a):
     jdump(open_q, os.path.join(rd, "open-questions.json"))
     jdump(rfiles, os.path.join(rd, "review-files.json"))
     write_allow(rd, targets_to_allow(approved))
+    notes = write_user_notes(rd)
+    if pre["output"]:
+        with open(os.path.join(rd, "pre-run.md"), "w", encoding="utf-8") as fo:
+            fo.write(pre["output"] + "\n")
     if a.apply_only:  # only apply what you marked: no sessions/wiki, window stays, questions untouched
         jdump([], os.path.join(rd, "answers.json"))
         jdump([], os.path.join(rd, "open-questions.json"))
@@ -825,7 +925,8 @@ def cmd_start(a):
         meta = {"event": "start", "run_id": run_id, "apply_only": True,
                 "covered_from": iso(since), "covered_until": iso(since),
                 "approved": len(approved), "rejected_now": len(rejected), "carried": len(pending),
-                "guard_session": sess, "run_dir": rd}
+                "guard_session": sess, "run_dir": rd, "user_notes": notes, "language": C.opt("language") or None,
+                "pre_run": pre["note"] or None}
         jdump(meta, os.path.join(rd, "meta.json"))
         append_history(meta)
         print(json.dumps(meta, ensure_ascii=False, indent=1))
@@ -908,6 +1009,8 @@ def cmd_start(a):
                 fo.write(f"- … +{len(rows) - 40}\n")
         if WIKI:
             fo.write(f"\n## Wiki log entries ({len(logs)})\n" + "".join(f"- {r}\n" for r in logs))
+        if pre["output"]:
+            fo.write("\n## From your pre_run_command\n\n" + pre["output"] + "\n")
 
     # 4. lint
     lt = lint({k: v for k, v in stats30.items()})
@@ -986,7 +1089,8 @@ def cmd_start(a):
             "wiki_full": wiki_full, "wiki_pages": len(wiki_pages), "wiki_enabled": bool(WIKI),
             "changed": {k: len(v) for k, v in ch.items()}, "lint": len(lt),
             "approved": len(approved), "rejected_now": len(rejected), "carried": len(pending),
-            "answers": len(answers), "open_questions": len(open_q), "guard_session": sess, "run_dir": rd}
+            "answers": len(answers), "open_questions": len(open_q), "guard_session": sess, "run_dir": rd,
+            "user_notes": notes, "language": C.opt("language") or None, "pre_run": pre["note"] or None}
     jdump(meta, os.path.join(rd, "meta.json"))
     append_history(meta)
     print(json.dumps(meta, ensure_ascii=False, indent=1))
@@ -1483,6 +1587,7 @@ def cmd_status(a):
 
 
 def main():
+    C.seed_config()  # first use: create the config file if missing (never overwrites)
     p = argparse.ArgumentParser(description="improve-system (self-improve plugin)")
     sp = p.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("start")
@@ -1521,13 +1626,16 @@ def main():
     ab.add_argument("run_id")
     ab.add_argument("--note")
     ab.add_argument("--corrupt-lock", action="store_true", help="unlock an unreadable lock (user only)")
+    wl = sp.add_parser("wait-lock", help="wait until start may run (wait_for_lock gone, pre_run_command not busy)")
+    wl.add_argument("--max-minutes", type=float, help="give up after this long (default: option lock_wait_minutes)")
+    wl.add_argument("--every", type=float, default=60, help="seconds between checks (default 60)")
     nt = sp.add_parser("notify", help="send one line through notify_command (no-op if not configured)")
     nt.add_argument("text")
     sp.add_parser("status")
     a = p.parse_args()
     {"start": cmd_start, "render": cmd_render, "log": cmd_log, "finish": cmd_finish, "status": cmd_status,
      "abort": cmd_abort, "backup": cmd_backup, "intent": cmd_intent, "apply-patch": cmd_apply_patch,
-     "notify": cmd_notify}[a.cmd](a)
+     "notify": cmd_notify, "wait-lock": cmd_wait_lock}[a.cmd](a)
 
 
 if __name__ == "__main__":

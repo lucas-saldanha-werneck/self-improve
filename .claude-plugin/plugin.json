@@ -1,6 +1,6 @@
 {
   "name": "self-improve",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "A self-improvement loop for Claude Code: finds where you corrected Claude more than once, sorts each fix into apply-now / needs-your-OK / needs-an-answer, lets you decide with buttons, and applies only what you approved.",
   "author": {
     "name": "Lucas Saldanha Werneck",
@@ -9,5 +9,13 @@
   "homepage": "https://github.com/lucas-saldanha-werneck/self-improve",
   "repository": "https://github.com/lucas-saldanha-werneck/self-improve",
   "license": "MIT",
-  "keywords": ["self-improvement", "corrections", "skills", "CLAUDE.md", "memory", "review", "hooks"]
+  "keywords": [
+    "self-improvement",
+    "corrections",
+    "skills",
+    "CLAUDE.md",
+    "memory",
+    "review",
+    "hooks"
+  ]
 }

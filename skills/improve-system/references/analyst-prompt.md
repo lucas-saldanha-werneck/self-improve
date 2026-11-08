@@ -12,6 +12,7 @@ Read:
 2. `<RUN_DIR>/repeats.md`: near-identical messages across sessions.
 3. `<RUN_DIR>/inventory.md` and `<RUN_DIR>/friction.md`: skill/config files that exist and who owns them.
 4. `<RUN_DIR>/previously-rejected.md`: what the user already refused.
+- If the lead gave you a `user-notes.md` path: read it first and follow it (language of your text, the user's own rules). JSON keys, kinds and buckets stay in English.
 
 Counts as a finding:
 - **correction**: the user says Claude got it wrong, did what was not asked, forgot something, claimed without checking, asked too much, talked too much, used the wrong tool, or had to say again something already said.

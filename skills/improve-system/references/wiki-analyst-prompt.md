@@ -10,6 +10,7 @@ a source). You do NOT edit any file other than your report.
 Read:
 1. `<RUN_DIR>/wiki-<NN>.md`: whole pages, each after `===== FILE: …`.
 2. `<RUN_DIR>/changes.md`: what came in or changed in the window (raw sources, wiki, memory, skills).
+- If the lead gave you a `user-notes.md` path: read it first and follow it (language of your text, the user's own rules). JSON keys, kinds and buckets stay in English.
 3. `<RUN_DIR>/lint.md`: machine findings (links, orphans, INDEX). Don't repeat them; use them as hints only.
 4. The wiki's own rules file, if there is one (`CLAUDE.md` in the wiki folder or its parent).
 5. `<RUN_DIR>/previously-rejected.md`.

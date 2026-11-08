@@ -113,10 +113,11 @@ def open_session(prefix):
     raw = os.environ.get("HUMAN_REVIEW_AGENTS_JSON")
     try:
         if raw is None:
-            exe = shutil.which("claude")
+            custom = C.opt("claude_command")  # e.g. a pinned stable copy of claude
+            exe = C.split_command(custom) if custom else ([shutil.which("claude")] if shutil.which("claude") else None)
             if not exe:
                 return None
-            raw = subprocess.run([exe, "agents", "--json"], capture_output=True, text=True, timeout=20).stdout
+            raw = subprocess.run(exe + ["agents", "--json"], capture_output=True, text=True, timeout=20).stdout
         return next((x["name"] for x in json.loads(raw or "[]")
                      if x.get("kind") == "interactive" and str(x.get("name", "")).startswith(prefix + " ")), None)
     except Exception:
