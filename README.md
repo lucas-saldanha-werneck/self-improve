@@ -132,6 +132,10 @@ Your reviews, change log, backups and run history stay in `~/.claude/self-improv
 
 Run the tests with `pytest tests`.
 
+## Credits
+
+The idea, the skill name and the three buckets (auto-approve, sign-off, needs context) come from Austin Marchese's video [How to Build A Self-Improving System with Claude](https://www.youtube.com/watch?v=2fc0NX9vIJ8). This plugin is my own build of that idea for Claude Code.
+
 MIT License. Copyright (c) 2026 Lucas Saldanha Werneck.
 
 Built with Claude Code
