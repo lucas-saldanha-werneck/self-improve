@@ -26,7 +26,7 @@ When in doubt between two buckets, use the safer one (CONTEXT > SIGN-OFF > AUTO)
 **Hard rule:** a SIGN-OFF item never touches skills, the wiki or config without the user's `[x]`. The plugin's
 PreToolUse hook (`scripts/guard.py`) enforces this while a run is active, **in every session**, until `finish` or `abort`:
 - A write passes only for an **exact** file in `allowed-paths.txt` (AUTO validated by `render` + `[x]` items). A folder is never released whole.
-- A Bash command that mentions a protected zone passes only if it is a read, a run of this plugin's scripts, or a write to a released path. `python -c`, `node -e`, `awk`, redirects to a variable = blocked. Make the edit with Edit/Write on the released file.
+- A Bash command that mentions a protected zone passes only if it is a read, a run of this plugin's scripts, or a write to a released path. `awk`, redirects to a variable = blocked. Code typed into a command (`python3 -c`, `node -e`, `bash -c`, a heredoc or pipe into an interpreter) is blocked during a run even when it names no protected path (unless the user set `allow_inline_code`). Use Read/Grep to inspect and Edit/Write on the released file to change.
 - Unreadable lock = blocked. Run control files (`active-run.json`, `allowed-paths.txt`, `approved.json`…) are written by the script only.
 - If the hook denies, **do not work around it**: the item goes to the review. Abandoned run: `IS abort <run_id>` (does not move the window, does not consume reviews). Claude can only abort if the session that owns the run is gone or the run is 2 h+ old; otherwise only the user, in their own terminal.
 

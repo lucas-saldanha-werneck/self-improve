@@ -1,6 +1,6 @@
 {
   "name": "self-improve",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A self-improvement loop for Claude Code: finds where you corrected Claude more than once, sorts each fix into apply-now / needs-your-OK / needs-an-answer, lets you decide with buttons, and applies only what you approved.",
   "author": {
     "name": "Lucas Saldanha Werneck",

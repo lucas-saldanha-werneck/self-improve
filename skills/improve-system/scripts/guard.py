@@ -15,6 +15,10 @@ Fails closed:
 - a Bash command that mentions a protected zone only passes if it is a read, the run of an audited
   self-improve script, or a write to a released path. Inline interpreters (python -c, node -e, awk,
   perl...), redirects to a variable and paths that can't be resolved = block.
+- code typed into a command (python3 -c, node -e, bash -c, heredoc or pipe into an interpreter) is blocked
+  during a run even without a protected path in it: it can build the path at run time. Option
+  allow_inline_code = 1 switches this off.
+Limit: a guardrail, not a sandbox. A script file or an unknown program can still write anywhere.
 Outside a run it does nothing.
 """
 import json, os, re, shlex, sys, time
@@ -31,7 +35,8 @@ SCRIPT = os.path.join(HERE, "improve_system.py")
 AUDITED = [SCRIPT, os.path.join(os.path.dirname(os.path.dirname(HERE)), "human-review", "scripts", "human_review.py")]
 ABORT_MIN_AGE_H = 2  # Claude may only abort a run idle for 2 h+; before that, only the user (in a terminal)
 # run control files: only the script writes them
-CONTROL = re.compile(r"(active-run\.json|allowed-paths\.txt|approved\.json|render\.json|applied\.jsonl|history\.jsonl)$")
+CONTROL = re.compile(r"(active-run\.json|allowed-paths\.txt|approved\.json|render\.json|applied\.jsonl|history\.jsonl|"
+                     r"review-hashes\.json)$")
 # text that gives away a zone even without a resolvable path (python -c "…/.claude/skills/…")
 MARKERS = C.path_markers()
 READONLY = {"ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "wc", "file", "stat", "jq", "diff", "cmp",
@@ -201,6 +206,35 @@ def abort_check(args):
     return None
 
 
+INLINE_INTERP = re.compile(r"^(python[\d.]*|pypy[\d.]*|node|nodejs|deno|bun|ruby|perl|php|bash|sh|zsh|dash|ksh|"
+                           r"fish|osascript)$")
+# per program: the short options that take code from the command line
+INLINE_FLAGS = {"python": "c", "pypy": "c", "node": "ep", "nodejs": "ep", "deno": "", "bun": "e", "ruby": "e",
+                "perl": "eE", "php": "r", "osascript": "e", "sh": "c"}
+INFO_ONLY = {"--version", "-V", "--help", "-h"}
+
+
+def inline_code(prog, args):
+    """'inline code' / 'code from stdin' when an interpreter runs code that is not a script file, else None."""
+    if not INLINE_INTERP.match(prog):
+        return None
+    fam = re.sub(r"[\d.]+$", "", prog)
+    fam = fam if fam in INLINE_FLAGS else "sh"
+    letters = INLINE_FLAGS[fam]
+    for x in args:
+        if x in ("--eval", "--print", "--command", "--execute") or x.startswith(("--eval=", "--print=")):
+            return "inline code"
+        if fam == "deno" and x == "eval":
+            return "inline code"
+        if re.match(r"^-[A-Za-z]+$", x) and any(ch in x[1:] for ch in letters):
+            return "inline code"
+    if fam == "python" and "-m" in args:
+        return None  # a module (python3 -m json.tool FILE): checked like any other program
+    if not [x for x in args if x != "-" and not x.startswith("-")] and not (args and set(args) <= INFO_ONLY):
+        return "code from stdin (heredoc or pipe)"
+    return None
+
+
 def check_bash(cmd, cwd, allow):
     """Devolve motivo de bloqueio, ou None."""
     # no shortcut: every command is read during a run (variables and symlinks do not escape)
@@ -263,6 +297,12 @@ def check_bash(cmd, cwd, allow):
                 if r:
                     return r
             continue
+        # code typed into the command (python -c, node -e, a heredoc or pipe into python3) can build any
+        # path at run time (Path.home()/".claude"), so its writes can't be checked from the text: blocked
+        inline = None if C.opt("allow_inline_code") else inline_code(prog, args)
+        if inline:
+            return (f"`{prog}` runs {inline} during a run; its writes can't be checked. Use Read/Grep, "
+                    f"Edit/Write on a released file, or wait until the run ends")
         vals = []
         for a in args:
             if "=" in a:  # of=/x, --output=/x, key=/x

@@ -30,6 +30,11 @@ import argparse, glob, json, os, re, shlex, subprocess, sys, time, unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
+try:
+    import fcntl
+except ImportError:  # Windows: no file lock (same as human_review `mark`)
+    fcntl = None
+
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import si_config as C  # noqa: E402
 
@@ -682,7 +687,43 @@ def parse_reviews(hist):
                     cur["answer"] += " " + line.strip()
         if cur:
             (answers if cur["answer"] else open_q).append(cur)
+    # the same question can be open in a new file and answered in an older one that stayed open
+    answered = {f"{x['run_id']}/{x['id']}" for x in answers}
+    open_q = [q for q in open_q if f"{q['run_id']}/{q['id']}" not in answered]
     return approved, rejected, pending, answers, open_q, files, warnings
+
+
+def item_digest(it):
+    """What the user approves: the fields shown in the review plus the paths it may touch."""
+    import hashlib
+    keep = {k: it.get(k) for k in ("title", "target", "extra_targets", "change", "patch")}
+    return hashlib.sha256(json.dumps(keep, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def rendered_digests():
+    """{review file: {run/id: digest}} from every render.json (older runs have no digests)."""
+    out = {}
+    for p in glob.glob(os.path.join(STATE, "runs", "*", "render.json")):
+        r = jload(p, {})
+        if r.get("review") and isinstance(r.get("digests"), dict):
+            out[os.path.realpath(r["review"])] = r["digests"]
+    return out
+
+
+def drop_changed_since_render(approved, pending, warnings):
+    """An [x] counts only for the content that was shown. If plan.json changed after render, the item goes
+    back to pending (it is shown again with the new content) instead of being applied."""
+    shown = rendered_digests()
+    keep = []
+    for it in approved:
+        d = shown.get(os.path.realpath(it.get("review_file", "")), {}).get(f"{it['run_id']}/{it['id']}")
+        if d and d != item_digest(it):
+            warnings.append(f"{it['run_id']}/{it['id']}: changed after it was shown in the review, "
+                            f"not applied; it comes back as pending")
+            pending.append(it)
+        else:
+            keep.append(it)
+    return keep
 
 
 def wiki_side_files():
@@ -767,6 +808,9 @@ def cmd_start(a):
 
     # 1. previous reviews
     approved, rejected, pending, answers, open_q, rfiles, warnings = parse_reviews(hist)
+    approved = drop_changed_since_render(approved, pending, warnings)
+    # finish compares these: a review marked after this point stays open instead of being consumed
+    jdump({f: sha256_of(f) for f in rfiles}, os.path.join(rd, "review-hashes.json"))
     flag_possibly_applied(approved)  # edited and crashed before `log` in an earlier run -> check, don't reapply
     jdump(warnings, os.path.join(rd, "review-warnings.json"))
     jdump(approved, os.path.join(rd, "approved.json"))
@@ -1046,6 +1090,8 @@ def cmd_render(a):
                          f"with {json.dumps(pt['new'], ensure_ascii=False)}")
         if it.get("carried_since"):
             lines.append(f"    - Pending since {it['carried_since']}")
+        for n in it.get("notes") or []:  # your adjustments travel with a pending item
+            lines.append(f"    - Note: {' '.join(str(n).split())}")
         return "\n".join(lines)
 
     if signoff or carried:
@@ -1081,8 +1127,10 @@ def cmd_render(a):
         open(p, "w").write("\n".join(body))
         out["needs_context"] = p
     allow = write_allow(rd, targets_to_allow(auto))
+    digests = {f"{a.run_id}/{i['id']}": item_digest(i) for i in signoff}
+    digests.update({f"{c['run_id']}/{c['id']}": item_digest(c) for c in carried})
     res = {**out, "suffix": suffix, "auto": len(auto), "signoff": len(signoff), "context": len(ctx),
-           "carried": len(carried), "open_questions": len(open_q), "allowed": allow}
+           "carried": len(carried), "open_questions": len(open_q), "allowed": allow, "digests": digests}
     jdump(res, os.path.join(rd, "render.json"))
     print(json.dumps(res, ensure_ascii=False, indent=1))
 
@@ -1098,11 +1146,14 @@ def item_for(run_id, ident):
     it = load_plan_item(rid, iid)
     if it is None:
         sys.exit(f"item {key} is not in the plan.json of run {rid}")
-    approved_keys = {f"{x['run_id']}/{x['id']}" for x in jload(os.path.join(rd, "approved.json"), [])}
+    approved = {f"{x['run_id']}/{x['id']}": x for x in jload(os.path.join(rd, "approved.json"), [])}
     if it.get("bucket") == "auto" and rid != run_id:
         sys.exit(f"{key} is AUTO from another run. AUTO is only applied in the run that proposed it")
-    if it.get("bucket") != "auto" and key not in approved_keys:
-        sys.exit(f"{key} is not approved with [x] in this run (approved.json), it can't be logged as applied")
+    if it.get("bucket") != "auto":
+        if key not in approved:
+            sys.exit(f"{key} is not approved with [x] in this run (approved.json), it can't be logged as applied")
+        # the snapshot taken at `start` wins: a plan.json edited after approval changes nothing
+        it = approved[key]
     tgts = [x[4:] if x.startswith("new:") else x for x in [it.get("target", "")] + list(it.get("extra_targets") or []) if x]
     ok_paths = {rp(x) for x in tgts}
     if WIKI and any(in_zone(x, [WIKI]) for x in tgts):
@@ -1154,6 +1205,23 @@ def cmd_intent(a):
     print(f"intent recorded: {key} -> {short(a.target)}")
 
 
+def invalid_config(target, old_text, new_text):
+    """Reason the patched file would break Claude Code, or None. Checks JSON files and SKILL.md frontmatter."""
+    if target.endswith(".json"):
+        try:
+            json.loads(new_text)
+        except ValueError as e:
+            return f"not valid JSON: {e}"
+    if os.path.basename(target) == "SKILL.md" and old_text.startswith("---"):
+        m = re.match(r"---\r?\n(.*?)\r?\n---(\r?\n|$)", new_text, re.S)
+        if not m:
+            return "SKILL.md frontmatter is missing or not closed"
+        for field in ("name", "description"):
+            if not re.search(rf"^{field}\s*:", m.group(1), re.M):
+                return f"SKILL.md frontmatter has no '{field}'"
+    return None
+
+
 def cmd_apply_patch(a):
     """Applies the item's {old, new} patch, exactly, with no interpretation: the text you approved is the text
     that goes in. `old` must appear once in the target; otherwise exit 4 and touch nothing."""
@@ -1173,9 +1241,12 @@ def cmd_apply_patch(a):
         print(f"{key}: the 'old' text appears {n} time(s) in {short(target)}. The target changed; nothing was touched",
               file=sys.stderr)
         sys.exit(4)
+    new_text = text.replace(patch["old"], patch["new"], 1)
+    bad = invalid_config(target, text, new_text)
+    if bad:
+        sys.exit(f"{key}: the patched {short(target)} would be invalid ({bad}). Nothing was touched")
     record_intent(a.run_id, key, target)
     bak = do_backup(a.run_id, target)
-    new_text = text.replace(patch["old"], patch["new"], 1)
     tmp = f"{target}.tmp-{os.getpid()}"
     with open(tmp, "w") as fo:
         fo.write(new_text)
@@ -1264,11 +1335,26 @@ def cmd_finish(a):
     if missing and not a.allow_missing:
         sys.exit("not in the change log: " + ", ".join(missing) +
                  "\nLog them with `log`, or close with --allow-missing --note 'why'.")
-    render = jload(os.path.join(rd, "render.json"), {})
     consumed = jload(os.path.join(rd, "review-files.json"), [])
     # a review with an [x] that was not applied stays open: the next run reads the [x] again (what was
     # applied never repeats: resolved_ids)
     keep_open = {x.get("review_file") for x in missing_appr}
+    # same lock as human_review `mark`: a mark lands either before this check (file stays open) or after
+    # the finish event (mark refuses a consumed file). Nothing recorded in between is lost.
+    os.makedirs(STATE, exist_ok=True)
+    with open(os.path.join(STATE, "mark.lock"), "w") as lk:
+        if fcntl:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+        _finish_locked(a, rd, done_ids, plan, rejected_now, missing, keep_open, consumed)
+    if not a.no_review and not jload(os.path.join(rd, "meta.json"), {}).get("apply_only"):
+        launch_review()
+
+
+def _finish_locked(a, rd, done_ids, plan, rejected_now, missing, keep_open, consumed):
+    render = jload(os.path.join(rd, "render.json"), {})
+    # a review file marked or answered after `start` read it stays open: the next run reads the new decision
+    hashes = jload(os.path.join(rd, "review-hashes.json"), {})
+    keep_open |= {f for f in consumed if f in hashes and sha256_of(f) != hashes[f]}
     consumed = [f for f in consumed if f not in keep_open]
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     for f in consumed:  # mark the old review as read (pending items were already copied to the new one)
@@ -1289,8 +1375,6 @@ def cmd_finish(a):
     if jload(LOCK, {}).get("run_id") == a.run_id:
         os.remove(LOCK)
     print(json.dumps(ev, ensure_ascii=False, indent=1))
-    if not a.no_review and not jload(os.path.join(rd, "meta.json"), {}).get("apply_only"):
-        launch_review()
 
 
 def do_abort(run_id, note):

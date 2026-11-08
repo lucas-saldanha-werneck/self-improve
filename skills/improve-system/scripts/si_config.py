@@ -26,6 +26,8 @@ DEFAULTS = {
     "skill_roots": [],         # extra skill folders; CLAUDE_HOME/skills is always included
     "project_roots": [],       # folders whose */CLAUDE.md and */*/CLAUDE.md are edit targets
     "extra_protected": [],     # more files/folders the guard protects during a run
+    "allow_inline_code": 0,    # 1 = during a run, let `python3 -c`, `node -e` and heredocs into interpreters run
+                               # unless their text names a protected path (weaker: built-up paths pass)
     "launch_command": "",      # opens a separate session: "{name}" and "{prompt}" are replaced. Empty = no launch
     "notify_command": "",      # program called with one line of text. Empty = no notifications
     "wait_for_lock": "",       # if this file exists, `start` exits with code 3 (another job is writing)

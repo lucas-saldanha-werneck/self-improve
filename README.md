@@ -54,12 +54,14 @@ Each finding lands in one of three buckets:
 
 ## The guard
 
-The plugin adds a `PreToolUse` hook on Edit, Write, MultiEdit, NotebookEdit and Bash. It does nothing unless a run is open. While a run is open, in every session, it blocks writes to your skill folders, `~/.claude/CLAUDE.md`, `settings.json`, `settings.local.json`, `hooks/`, `output-styles/`, `agents/`, `commands/`, any project's `.claude/` config, the wiki (if you set one) and anything in `extra_protected`. The only exceptions are the exact files the run released: the AUTO targets and the items you approved. It also blocks Bash commands that write there in ways it can't check, such as `python -c`, `sed -i` or a redirect.
+The plugin adds a `PreToolUse` hook on Edit, Write, MultiEdit, NotebookEdit and Bash. It does nothing unless a run is open. While a run is open, in every session, it blocks writes to your skill folders, `~/.claude/CLAUDE.md`, `settings.json`, `settings.local.json`, `hooks/`, `output-styles/`, `agents/`, `commands/`, any project's `.claude/` config, the wiki (if you set one) and anything in `extra_protected`. The only exceptions are the exact files the run released: the AUTO targets and the items you approved. It also blocks Bash commands that write there in ways it can't check, such as `sed -i` or a redirect. During a run it blocks all code typed into a command, in any folder: `python3 -c`, `node -e`, `bash -c`, and a heredoc or pipe into an interpreter. Such code can build a path at run time, so the guard can't see where it writes. Set `allow_inline_code` to `1` to allow it again; then only code whose text names a protected path is blocked.
+
+What the guard is and is not: it reads each tool call before it runs and stops the writes it can recognize. It is a guardrail against mistakes, not a sandbox. A script file run with `python3 script.py`, or a program it doesn't know, can still write anywhere your user account can. For a hard boundary, run Claude Code in a container or as a user that can't write to `~/.claude`.
 
 A run ends with `finish` or `abort`. The lock never expires by itself. Claude may only abort a run that is at least 2 hours old or whose session is gone. A younger run can only be aborted by you, in your own terminal:
 
 ```
-python3 ~/.claude/plugins/cache/self-improve/self-improve/0.1.0/skills/improve-system/scripts/improve_system.py abort <run_id>
+python3 ~/.claude/plugins/cache/self-improve/self-improve/0.2.0/skills/improve-system/scripts/improve_system.py abort <run_id>
 ```
 
 (`status` prints the active run id.)
@@ -77,6 +79,7 @@ Everything works without configuration. To change something, create `~/.claude/s
 | `raw_dir` | (off) | Source files the wiki is built from. Never edited; new files show up as gaps |
 | `wiki_auto_dirs` | (none) | Wiki sub-folders with generated pages, skipped by the lint |
 | `extra_protected` | (none) | More files or folders the guard protects during a run |
+| `allow_inline_code` | `0` | `1` lets `python3 -c`, `node -e` and heredocs into interpreters run during a run, unless their text names a protected path |
 | `launch_command` | (off) | Opens the review and apply steps in a separate session (see below) |
 | `notify_command` | (off) | Program called with one line of text at the end of a step |
 | `wait_for_lock` | (off) | If this file exists, a run refuses to start (exit code 3), so it doesn't overlap another job |
@@ -105,8 +108,8 @@ None of these are needed. Each one adds something, and the plugin falls back whe
 1. `start` reads `~/.claude/projects/*/*.jsonl` since the last finished run. It keeps your own messages, interrupts (Esc) and tool rejections, marks messages that look like corrections (English and Portuguese patterns), groups near-identical messages across sessions and counts friction per skill.
 2. It also lists what changed (skills, config, memory, wiki), runs a lint, and splits the sessions into chunks.
 3. Claude sends one subagent per chunk to find corrections, repeats, repeated tasks, friction and lost context. Their findings are merged, each target is opened and read, and the plan goes through `render`, which refuses anything outside the bucket rules.
-4. Changes are applied with `backup`, `intent` (records the file's hash so a crash never applies twice) and `log`. An approved item with a `patch` is applied by `apply-patch`, which swaps the exact text you saw and refuses if that text is no longer in the file exactly once.
-5. `finish` closes the run, carries `[ ]` items and open questions into the new review files, and releases the guard.
+4. Changes are applied with `backup`, `intent` (records the file's hash so a crash never applies twice) and `log`. An approved item with a `patch` is applied by `apply-patch`, which swaps the exact text you saw and refuses if that text is no longer in the file exactly once. It also refuses, and leaves the file as it was, if the result would be invalid JSON (for a `.json` file) or a `SKILL.md` without its `name` and `description` frontmatter. Your `[x]` counts for the item as the review showed it: if the plan behind it changes after the review was written, the item is not applied and comes back as pending with the new text. After `start`, the run works from its own copy of what you approved.
+5. `finish` closes the run, carries `[ ]` items (with their `Note:` lines) and open questions into the new review files, and releases the guard. A review file you marked or answered after `start` read it is left open, so the next run reads your new decision.
 
 ## Uninstall
 
