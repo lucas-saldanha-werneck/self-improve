@@ -97,6 +97,39 @@ Your file is `~/.config/self-improve/config.json` (`$XDG_CONFIG_HOME/self-improv
 | `claude_command` | `claude` on `PATH` | The `claude` program asked for open sessions (`claude agents --json`) before a launch, for example a pinned copy |
 | `ignore_message_regex` | (off) | Your messages that match are not read (for example text a hook types for you) |
 | `max_signoff` | `10` | New SIGN-OFF items per run |
+| `labels` | English | Your words for the fixed text `render` writes into the review files (see *Labels* below) |
+
+### Labels
+
+`labels` replaces the fixed words `render` writes into `review-*.md` and `needs-context-*.md`: headings, field names, the instructions at the top. It is an object `{key: text}`; the environment variable `SELF_IMPROVE_LABELS` takes the same object as JSON. A key you leave out stays English. An unknown key, or a value that is not one line of text, is ignored, and `render` prints a warning (also under `label_warnings` in its output). Item titles, questions and evidence follow `language`, not this option.
+
+```json
+{ "labels": { "new": "Novos", "where": "Onde", "note": "Nota", "answer": "Resposta" } }
+```
+
+The next run reads two of these words back: `note` (your adjustment lines under an item) and `answer` (the answer line of a question). The parser accepts the English word, the Portuguese `Nota` / `Resposta` and your label, so files written before you changed a label still work, and human-review writes with your label. Because of that, `note` and `answer` can't contain `:`, and `note` can't be the same word as `where`, `evidence`, `change`, `why`, `risk`, `exact_change` or `pending_since` (those lines would be read as notes); such a value falls back to English with a warning. In `review_intro` and `context_intro`, `{run}`, `{note}` and `{answer}` are replaced by the run id and those two labels.
+
+| Key | English default |
+|---|---|
+| `review_title` | improve-system review |
+| `review_intro` | Run `{run}`. Mark `[x]` to apply, `[-]` to reject for good. Leave `[ ]` to decide later (it comes back in the next run). To adjust an item, write a line `{note}: ...` right below it. |
+| `review_footer` | Nothing here is applied before the next run (or execute-reviewed). |
+| `new` | New |
+| `still_pending` | Still pending |
+| `where` | Where |
+| `evidence` | Evidence |
+| `change` | Change |
+| `why` | Why |
+| `risk` | Risk |
+| `exact_change` | Exact change |
+| `replace` | replace |
+| `with` | with |
+| `pending_since` | Pending since |
+| `note` | Note |
+| `context_title` | Context needed |
+| `context_intro` | Run `{run}`. Answer on the **{answer}:** line of each question. The next run reads the answers and picks the bucket. |
+| `why_i_ask` | Why I ask |
+| `answer` | Answer |
 
 `SELF_IMPROVE_HOME` moves the whole state folder (default `~/.claude/self-improve`), and the config file with it. `CLAUDE_CONFIG_DIR` is respected for where sessions, skills and Claude Code's own config are read.
 
@@ -130,7 +163,7 @@ None of these are needed. Each one adds something, and the plugin falls back whe
 2. It also lists what changed (skills, config, memory, wiki), runs a lint, and splits the sessions into chunks.
 3. Claude sends one subagent per chunk to find corrections, repeats, repeated tasks, friction and lost context. Their findings are merged, each target is opened and read, and the plan goes through `render`, which refuses anything outside the bucket rules.
 4. Changes are applied with `backup`, `intent` (records the file's hash so a crash never applies twice) and `log`. An approved item with a `patch` is applied by `apply-patch`, which swaps the exact text you saw and refuses if that text is no longer in the file exactly once. It also refuses, and leaves the file as it was, if the result would be invalid JSON (for a `.json` file) or a `SKILL.md` without its `name` and `description` frontmatter. Your `[x]` counts for the item as the review showed it: if the plan behind it changes after the review was written, the item is not applied and comes back as pending with the new text. After `start`, the run works from its own copy of what you approved.
-5. `finish` closes the run, carries `[ ]` items (with their `Note:` lines) and open questions into the new review files, and releases the guard. A review file you marked or answered after `start` read it is left open, so the next run reads your new decision.
+5. `finish` closes the run, carries `[ ]` items (with their `Note:` lines, or your `note` label) and open questions into the new review files, and releases the guard. A review file you marked or answered after `start` read it is left open, so the next run reads your new decision.
 
 ## Uninstall
 

@@ -82,11 +82,11 @@ def _mark_locked(a, f):
         j = next((k for k in range(idx + 1, len(lines)) if isys.ANSWER_RE.match(lines[k])
                   or isys.ANS_HEAD_RE.match(lines[k])), None)
         if j is None or not isys.ANSWER_RE.match(lines[j]):
-            sys.exit(f"{a.ref}: no **Answer:** line")
+            sys.exit(f"{a.ref}: no **{isys.LABELS['answer']}:** line")
         k = j + 1  # an old answer may continue on the lines below
         while k < len(lines) and lines[k].strip() and not lines[k].startswith(("#", "---", ">")):
             k += 1
-        lines[j:k] = [f"**Answer:** {one_line(a.answer)}"]
+        lines[j:k] = [f"**{isys.LABELS['answer']}:** {one_line(a.answer)}"]
     else:
         if not isys.ITEM_RE.match(lines[idx]):
             sys.exit(f"{a.ref} is not a SIGN-OFF item")
@@ -96,7 +96,7 @@ def _mark_locked(a, f):
             end += 1
         block = [l for l in lines[idx + 1:end] if not NOTE_RE.match(l)]
         if a.note:
-            block.append(f"    - Note: {one_line(a.note)}")
+            block.append(f"    - {isys.LABELS['note']}: {one_line(a.note)}")
         lines[idx + 1:end] = block
     tmp = os.path.join(os.path.dirname(f), f".{os.path.basename(f)}.tmp-{os.getpid()}")
     with open(tmp, "w", encoding="utf-8") as fo:  # whole file or nothing: a crash halfway does not truncate the review
