@@ -100,6 +100,9 @@ LABELS = {
 }
 # Item lines the parser must never take for a note: the note label may not be one of these.
 _ITEM_FIELD_LABELS = ("where", "evidence", "change", "why", "risk", "exact_change", "pending_since")
+# Words the parser always reads as "note" / "answer", whatever the labels (older files use them).
+BUILTIN_NOTE_WORDS = ("note", "nota")
+BUILTIN_ANSWER_WORDS = ("Answer", "Resposta")
 
 
 def labels():
@@ -125,17 +128,23 @@ def labels():
             warns.append(f"labels: {k!r} must be one line of text; using {LABELS[k]!r}")
         else:
             out[k] = v.strip()
+    for k in ("note", "answer"):
+        if ":" in out[k]:
+            warns.append(f"labels: {k!r} can't contain ':' (the parser splits there); using {LABELS[k]!r}")
+            out[k] = LABELS[k]
+    # A note label equal to a field word (yours, or the English one older files still hold) would turn
+    # those lines into notes; so would a field label equal to a word the parser reads as "note".
     note = out["note"].casefold()
-    clash = [k for k in _ITEM_FIELD_LABELS if out[k].casefold() == note]
+    clash = [k for k in _ITEM_FIELD_LABELS if note in (out[k].casefold(), LABELS[k].casefold())]
     if clash:
-        warns.append(f"labels: 'note' is the same as {', '.join(clash)}; those lines would be read as notes. "
-                     f"Using {LABELS['note']!r} for 'note'")
+        warns.append(f"labels: 'note' is the same word as the {', '.join(clash)} field; those lines would be "
+                     f"read as notes. Using {LABELS['note']!r} for 'note'")
         out["note"] = LABELS["note"]
-    if ":" in out["note"] or ":" in out["answer"]:
-        for k in ("note", "answer"):
-            if ":" in out[k]:
-                warns.append(f"labels: {k!r} can't contain ':' (the parser splits there); using {LABELS[k]!r}")
-                out[k] = LABELS[k]
+    note_words = {w.casefold() for w in BUILTIN_NOTE_WORDS + (out["note"],)}
+    for k in _ITEM_FIELD_LABELS:
+        if out[k].casefold() in note_words:
+            warns.append(f"labels: {k!r} = {out[k]!r} is a word the parser reads as a note; using {LABELS[k]!r}")
+            out[k] = LABELS[k]
     return out, warns
 
 

@@ -24,7 +24,6 @@ import si_config as C  # noqa: E402
 PROMPTS = {"review": "/self-improve:human-review answer", "exec": "/self-improve:execute-reviewed"}
 NAMES = {"review": "REVIEW", "exec": "EXEC"}
 MARK = {"apply": "x", "reject": "-", "later": " "}
-NOTE_RE = isys.NOTE_LINE_RE
 
 
 def one_line(s):
@@ -70,6 +69,9 @@ def _mark_locked(a, f):
     if f in {os.path.realpath(x) for x in isys.consumed_files(isys.read_history())}:
         sys.exit(f"{os.path.basename(f)} was already read by an improve-system run; run `items` again "
                  f"(the item is in the newest review)")
+    for w in isys.LABEL_WARNINGS:  # a label that fell back to English: say why the file gets the English word
+        print(f"warning: {w}", file=sys.stderr)
+    note_re, answer_re = isys.regexes_for(f)
     rid, iid = a.ref.split("/", 1)
     tag = re.compile(r"<!--\s*" + re.escape(rid) + "/" + re.escape(iid) + r"\s*-->")
     lines = open(f, errors="ignore", encoding="utf-8").read().splitlines()
@@ -79,9 +81,9 @@ def _mark_locked(a, f):
     if a.answer is not None:
         if not isys.ANS_HEAD_RE.match(lines[idx]):
             sys.exit(f"{a.ref} is not a CONTEXT question")
-        j = next((k for k in range(idx + 1, len(lines)) if isys.ANSWER_RE.match(lines[k])
+        j = next((k for k in range(idx + 1, len(lines)) if answer_re.match(lines[k])
                   or isys.ANS_HEAD_RE.match(lines[k])), None)
-        if j is None or not isys.ANSWER_RE.match(lines[j]):
+        if j is None or not answer_re.match(lines[j]):
             sys.exit(f"{a.ref}: no **{isys.LABELS['answer']}:** line")
         k = j + 1  # an old answer may continue on the lines below
         while k < len(lines) and lines[k].strip() and not lines[k].startswith(("#", "---", ">")):
@@ -94,7 +96,7 @@ def _mark_locked(a, f):
         end = idx + 1
         while end < len(lines) and lines[end].startswith(" "):
             end += 1
-        block = [l for l in lines[idx + 1:end] if not NOTE_RE.match(l)]
+        block = [l for l in lines[idx + 1:end] if not note_re.match(l)]
         if a.note:
             block.append(f"    - {isys.LABELS['note']}: {one_line(a.note)}")
         lines[idx + 1:end] = block

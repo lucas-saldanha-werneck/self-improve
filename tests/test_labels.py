@@ -1,7 +1,9 @@
 """Option `labels`: your words for the fixed text `render` writes. Absent/null = today's English files;
 set = your words, and the next run still reads notes and answers back; bad values = warnings, never a crash."""
 import json
-from conftest import run, last_run_dir, HR
+import os
+import sys
+from conftest import run, last_run_dir, HR, ROOT, SCRIPTS
 
 FR = {"review_title": "Revue", "new": "Nouveaux", "still_pending": "En attente", "where": "Où",
       "evidence": "Preuve", "change": "Changement", "why": "Pourquoi", "risk": "Risque",
@@ -148,8 +150,72 @@ def test_labels_that_would_break_the_parser_fall_back(env):
     rid = new_run(env)
     r, res, review, ctx = render(env, rid)
     w = " ".join(res["label_warnings"])
-    assert "'note' is the same as where" in w and "'answer' can't contain ':'" in w
+    assert "'note' is the same word as the where field" in w and "'answer' can't contain ':'" in w
     assert "**Answer:** " in ctx
     run(env, "mark", "--file", res["review"], "--ref", f"{rid}/S01", "--choice", "later", script=HR)
     s01 = next(i for i in json.loads(run(env, "items", script=HR).stdout)["open"] if i["ref"] == f"{rid}/S01")
     assert s01["notes"] == [], "the Where line was not read as a note"
+
+
+def test_field_label_that_is_a_note_word_falls_back(env):
+    # "Nota" is always read as a note: an evidence line labelled "Nota" would become a note
+    config(env, {"evidence": "Nota", "note": "Obs"})
+    rid = new_run(env)
+    r, res, review, _ = render(env, rid)
+    assert "'evidence' = 'Nota' is a word the parser reads as a note" in " ".join(res["label_warnings"])
+    assert "    - Evidence: 3 sessions" in review and "Nota:" not in review
+    run(env, "mark", "--file", res["review"], "--ref", f"{rid}/S01", "--choice", "later", script=HR)
+    assert "    - Evidence: 3 sessions" in open(res["review"], encoding="utf-8").read(), "mark kept the line"
+    s01 = next(i for i in json.loads(run(env, "items", script=HR).stdout)["open"] if i["ref"] == f"{rid}/S01")
+    assert s01["notes"] == []
+
+
+def test_note_label_equal_to_an_english_field_word_falls_back(env):
+    # older English files still hold "Where:" lines, even after where is relabelled
+    config(env, {"where": "Onde", "note": "Where"})
+    r = run(env, "items", script=HR)
+    s02 = next(i for i in json.loads(r.stdout)["open"] if i["ref"] == "R0/S02")
+    assert s02["notes"] == [], "the English Where line of an old file was not read as a note"
+    rid = new_run(env)
+    _, res, review, _ = render(env, rid)
+    assert "'note' is the same word as the where field" in " ".join(res["label_warnings"])
+    assert "    - Onde: " in review
+
+
+def test_answers_and_notes_survive_a_second_label_change(env):
+    config(env, FR)
+    rid = new_run(env)
+    _, res, _, _ = render(env, rid)
+    run(env, "mark", "--file", res["review"], "--ref", f"{rid}/S01", "--choice", "later", "--note", "use B",
+        script=HR)
+    run(env, "mark", "--file", res["needs_context"], "--ref", f"{rid}/C01", "--answer", "B", script=HR)
+    config(env, {"note": "Obs", "answer": "Resp"})  # labels change again before the next run
+    items = json.loads(run(env, "items", script=HR).stdout)["open"]
+    assert f"{rid}/C01" not in [i["ref"] for i in items], "the Réponse answer is still read"
+    assert next(i for i in items if i["ref"] == f"{rid}/S01")["notes"] == ["use B"], "the Remarque note too"
+    # the question left open in that file can still be answered, and a new note replaces the old one
+    run(env, "mark", "--file", res["needs_context"], "--ref", f"{rid}/C01", "--answer", "A", script=HR)
+    ctx = open(res["needs_context"], encoding="utf-8").read()
+    assert "**Resp:** A" in ctx and "Réponse:** B" not in ctx
+    run(env, "mark", "--file", res["review"], "--ref", f"{rid}/S01", "--choice", "later", "--note", "x", script=HR)
+    text = open(res["review"], encoding="utf-8").read()
+    assert "    - Obs: x" in text and "- Remarque:" not in text
+    status = run(env, "status").stdout
+    assert "answers=1" in status, status
+
+
+def test_mark_says_why_a_label_fell_back(env):
+    config(env, {"note": "Obs: "})
+    r = run(env, "mark", "--file", str(env["out"] / "review-2026-09-20.md"), "--ref", "R0/S02", "--choice", "later",
+            "--note", "n", script=HR)
+    assert "warning: labels: 'note' can't contain ':'" in r.stderr
+
+
+def test_every_label_key_and_default_is_documented():
+    sys.path.insert(0, SCRIPTS)
+    import si_config as C
+    readme = open(os.path.join(ROOT, "README.md"), encoding="utf-8").read()
+    doc = json.load(open(os.path.join(ROOT, "config.example.json"), encoding="utf-8"))["_doc"]["labels"]
+    for k, v in C.LABELS.items():
+        assert f"| `{k}` | {v.replace('|', '&#124;')} |" in readme, k
+        assert f"{k} = {v!r}" in doc, k

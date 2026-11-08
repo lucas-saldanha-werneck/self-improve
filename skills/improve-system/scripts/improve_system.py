@@ -619,10 +619,38 @@ def _words(*words):
     return "|".join(re.escape(w) for w in sorted(dict.fromkeys(words), key=len, reverse=True))
 
 
-# English, the old Portuguese word and your label all count: files written before a label change still parse
-ANSWER_WORDS = _words("Answer", "Resposta", LABELS["answer"])
-ANSWER_RE = re.compile(r"^\*\*(?:" + ANSWER_WORDS + r"):\*\*\s*(.*)$")
-NOTE_LINE_RE = re.compile(r"^\s*[-*]?\s*(" + _words("note", "nota", LABELS["note"]) + r")\s*:", re.I)
+def answer_re(*extra):
+    return re.compile(r"^\*\*(?:" + _words(*C.BUILTIN_ANSWER_WORDS, LABELS["answer"], *extra) + r"):\*\*\s*(.*)$")
+
+
+def note_re(*extra):
+    return re.compile(r"^\s*[-*]?\s*(" + _words(*C.BUILTIN_NOTE_WORDS, LABELS["note"], *extra) + r")\s*:", re.I)
+
+
+# English, the old Portuguese word and your current label always count. A file also accepts the labels it
+# was written with (recorded in render.json), so a later label change does not hide its notes or answers.
+ANSWER_RE = answer_re()
+NOTE_LINE_RE = note_re()
+
+
+def file_labels():
+    """{real path of a review file: {"note": ..., "answer": ...}} as render wrote them (older runs: none)."""
+    out = {}
+    for p in glob.glob(os.path.join(STATE, "runs", "*", "render.json")):
+        r = jload(p, {})
+        lab = r.get("labels") if isinstance(r.get("labels"), dict) else {}
+        for k in ("review", "needs_context"):
+            if r.get(k) and lab:
+                out[os.path.realpath(r[k])] = {x: str(lab[x]) for x in ("note", "answer") if lab.get(x)}
+    return out
+
+
+def regexes_for(path, known=None):
+    """(note regex, answer regex) for one review file: built-in words, current labels, and its own labels."""
+    lab = (file_labels() if known is None else known).get(os.path.realpath(path), {})
+    if not lab:
+        return NOTE_LINE_RE, ANSWER_RE
+    return note_re(*filter(None, [lab.get("note")])), answer_re(*filter(None, [lab.get("answer")]))
 
 
 def consumed_files(hist):
@@ -663,10 +691,12 @@ def parse_reviews(hist):
     resolved = resolved_ids(hist)
     seen_items = {}
     approved, rejected, pending, answers, open_q, files, warnings = [], [], [], [], [], [], []
+    known = file_labels()
     for f in sorted(glob.glob(os.path.join(OUT, "review-*.md"))):
         if f in done:
             continue
         files.append(f)
+        note_line_re = regexes_for(f, known)[0]
         lines = open(f, errors="ignore", encoding="utf-8").read().splitlines()
         for i, line in enumerate(lines):
             m = ITEM_RE.match(line)
@@ -686,7 +716,7 @@ def parse_reviews(hist):
             for nxt in lines[i + 1:]:
                 if not nxt.startswith(" ") and nxt.strip():
                     break
-                nm = NOTE_LINE_RE.match(nxt)
+                nm = note_line_re.match(nxt)
                 if nm:
                     notes.append(nxt[nm.end():].strip())
             it = load_plan_item(rid, iid) or {"id": iid, "run_id": rid, "title": line, "missing_plan": True}
@@ -708,6 +738,7 @@ def parse_reviews(hist):
         if f in done:
             continue
         files.append(f)
+        ans_re = regexes_for(f, known)[1]
         cur = None
         for line in open(f, errors="ignore", encoding="utf-8").read().splitlines():
             h = ANS_HEAD_RE.match(line)
@@ -718,7 +749,7 @@ def parse_reviews(hist):
                 cur = {**it, "answer": "", "file": f}
                 continue
             if cur is not None:
-                m = ANSWER_RE.match(line)
+                m = ans_re.match(line)
                 if m:
                     cur["answer"] = m.group(1).strip()
                 elif cur["answer"] and line.strip() and not line.startswith(("#", "---", ">")):
@@ -1243,6 +1274,7 @@ def cmd_render(a):
     digests.update({f"{c['run_id']}/{c['id']}": item_digest(c) for c in carried})
     res = {**out, "suffix": suffix, "auto": len(auto), "signoff": len(signoff), "context": len(ctx),
            "carried": len(carried), "open_questions": len(open_q), "allowed": allow, "digests": digests}
+    res["labels"] = {"note": L["note"], "answer": L["answer"]}  # the parser reads these back from this file
     if LABEL_WARNINGS:
         res["label_warnings"] = LABEL_WARNINGS
     jdump(res, os.path.join(rd, "render.json"))
@@ -1591,12 +1623,14 @@ def cmd_status(a):
     pend = [f for f in sorted(glob.glob(os.path.join(OUT, "review-*.md")) +
                               glob.glob(os.path.join(OUT, "needs-context-*.md"))) if f not in done]
     print("reviews waiting for you:" if pend else "no review waiting.")
+    known = file_labels()
     for f in pend:
         t = open(f, errors="ignore", encoding="utf-8").read()
         n_appr = len(re.findall(r"^- \[[xX]\]", t, re.M))
         n_rej = len(re.findall(r"^- \[-\]", t, re.M))
         n_open = len(re.findall(r"^- \[ \]", t, re.M))
-        n_ans = len(re.findall(r"^\*\*(?:" + ANSWER_WORDS + r"):\*\* *\S", t, re.M))
+        ans_re = regexes_for(f, known)[1]
+        n_ans = sum(1 for m in map(ans_re.match, t.splitlines()) if m and m.group(1).strip())
         print(f"  {short(f)}  approved={n_appr} rejected={n_rej} open={n_open} answers={n_ans}")
 
 
