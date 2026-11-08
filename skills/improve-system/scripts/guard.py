@@ -52,21 +52,22 @@ INTERP = {"python", "python3", "bash", "sh", "zsh", "node", "ruby", "perl", "osa
 PREFIX = {"sudo", "env", "command", "time", "nohup", "exec", "caffeinate"}
 
 
-def rp(p):
-    return os.path.realpath(os.path.expanduser(p))
+rp = C.rp
 
 
 def in_zone(p):
     r = rp(p)
-    if CONTROL.search(r) and r.startswith(rp(STATE) + "/"):
+    if CONTROL.search(r) and C.path_key(r).startswith(C.path_key(STATE) + "/"):
         return True
     return C.is_protected(r)
 
+
 def allowed(p, allow):
+    """allow holds C.path_key() values (C.read_allowed)."""
     r = rp(p)
     if CONTROL.search(r):
         return False  # a control file is never released to the agent
-    return r in allow
+    return C.path_key(r) in allow
 
 
 def deny(msg):
@@ -81,7 +82,7 @@ def expand(t):
 
 def resolve(t, cwd):
     t = expand(t)
-    return t if t.startswith(("/", "~")) else os.path.join(cwd, t)
+    return t if t.startswith(("/", "~")) or os.path.isabs(t) else os.path.join(cwd, t)
 
 
 def runs_start(cmd):
@@ -179,6 +180,8 @@ def claude_pid():
 
 
 def pid_alive(pid):
+    if os.name == "nt":
+        return True  # os.kill(pid, 0) would END the process on Windows; unknown = assume it is alive
     try:
         os.kill(int(pid), 0)
         return True
@@ -191,7 +194,8 @@ def pid_alive(pid):
 def abort_check(args):
     """abort/--force coming from Claude only works on a run idle for ABORT_MIN_AGE_H h (otherwise only the user)."""
     try:
-        lk = json.load(open(LOCK))
+        with open(LOCK, encoding="utf-8") as f:
+            lk = json.load(f)
         age_h = (time.time() - lk.get("started_epoch", 0)) / 3600
     except Exception:
         return "unreadable lock: only the user can unlock it (in a terminal: `python3 … abort RUN_ID --corrupt-lock`)"
@@ -251,6 +255,9 @@ def check_bash(cmd, cwd, allow):
             t = t2
         return t
     cmd = strip_heredocs(cmd)
+    if C.WINDOWS:
+        # a backslash is a path separator on Windows: C:\\x\\SKILL.md must be read as a path, not as escapes
+        cmd = cmd.replace("\\", "/")
     for seg in split_segments(cmd):
         seg_s = seg.strip().rstrip(")")
         # loop/condition keywords are not programs: `do python3 x`, `then cp a b`
@@ -290,9 +297,9 @@ def check_bash(cmd, cwd, allow):
             script = resolve(args[0], cwd)
         elif "/" in toks[0] and os.path.isfile(resolve(toks[0], cwd)):
             script = resolve(toks[0], cwd)
-        if script and os.path.isfile(script) and rp(script) in {rp(x) for x in AUDITED}:
+        if script and os.path.isfile(script) and C.path_key(script) in {C.path_key(x) for x in AUDITED}:
             sub_cmd = (args[1] if len(args) > 1 else "") if prog in INTERP else (args[0] if args else "")
-            if rp(script) == rp(SCRIPT) and (sub_cmd == "abort" or (sub_cmd == "start" and "--force" in args)):
+            if C.path_key(script) == C.path_key(SCRIPT) and (sub_cmd == "abort" or (sub_cmd == "start" and "--force" in args)):
                 r = abort_check(args)
                 if r:
                     return r
@@ -356,14 +363,14 @@ def check_bash(cmd, cwd, allow):
 
 
 def main():
-    raw = sys.stdin.read()
+    raw = sys.stdin.buffer.read().decode("utf-8", "replace")  # Claude Code sends UTF-8 on every OS
     try:
         d0 = json.loads(raw)
         c0 = ((d0.get("tool_input") or {}).get("command") or "") if d0.get("tool_name") == "Bash" else ""
         if runs_start(c0):
             os.makedirs(STATE, exist_ok=True)
             json.dump({"session_id": d0.get("session_id"), "owner_pid": claude_pid(), "epoch": time.time()},
-                      open(os.path.join(STATE, "starting-session.json"), "w"))
+                      open(os.path.join(STATE, "starting-session.json"), "w", encoding="utf-8"))
     except Exception:
         pass
     if not os.path.exists(LOCK):
@@ -374,9 +381,9 @@ def main():
         deny("improve-system run active and the hook input is unreadable: blocked to be safe")
     tool, ti = d.get("tool_name", ""), d.get("tool_input") or {}
     try:
-        lock = json.load(open(LOCK))
-        allow_p = os.path.join(lock["run_dir"], "allowed-paths.txt")
-        allow = {l.strip() for l in open(allow_p) if l.strip()} if os.path.exists(allow_p) else set()
+        with open(LOCK, encoding="utf-8") as f:
+            lock = json.load(f)
+        allow = C.read_allowed(os.path.join(lock["run_dir"], "allowed-paths.txt"))
         run_id = lock["run_id"]
     except Exception as e:
         lock, allow, run_id = None, set(), "?"

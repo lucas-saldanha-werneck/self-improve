@@ -1,4 +1,4 @@
-import json
+import json, os
 from conftest import run, pyeval, last_run_dir
 
 
@@ -13,7 +13,7 @@ def test_apply_only_reads_marks_without_scanning(env):
     assert json.loads((rd / "answers.json").read_text()) == []
     assert json.loads((rd / "open-questions.json").read_text()) == []
     files = json.loads((rd / "review-files.json").read_text())
-    assert len(files) == 1 and files[0].endswith("/review-2026-09-20.md")
+    assert len(files) == 1 and os.path.basename(files[0]) == "review-2026-09-20.md"
     assert json.loads((rd / "plan.json").read_text()) == []
     assert not (rd / "events.jsonl").exists()  # did not read sessions
     assert str(env["target"].resolve()) in (rd / "allowed-paths.txt").read_text()

@@ -12,6 +12,7 @@ Every option is optional. Without any config the tool works on CLAUDE.md files, 
 import json
 import os
 import re
+import shlex
 
 HOME = os.path.expanduser("~")
 CLAUDE_HOME = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"))
@@ -38,7 +39,7 @@ DEFAULTS = {
 
 def _load_file():
     try:
-        with open(CONFIG_FILE) as f:
+        with open(CONFIG_FILE, encoding="utf-8") as f:
             v = json.load(f)
         return v if isinstance(v, dict) else {}
     except Exception:
@@ -88,16 +89,64 @@ OLD_BACKUPS = os.path.join(SI_HOME, "backups", "old")
 
 # A project's own .claude folder holds config too (skills, hooks, settings). Protected anywhere.
 PROJECT_CONFIG_RE = re.compile(r"/\.claude/(skills|hooks|agents|commands|output-styles)(/|$)|"
-                               r"/\.claude/(settings(\.local)?\.json|CLAUDE\.md)$")
+                               r"/\.claude/(settings(\.local)?\.json|CLAUDE\.md)$", re.I if os.name == "nt" else 0)
+
+
+WINDOWS = os.name == "nt"
+if WINDOWS:  # output is UTF-8 on every OS (Windows pipes default to a legacy code page and fail on "⚑")
+    import sys
+    for _s in (sys.stdout, sys.stderr):
+        try:
+            _s.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 
 def rp(p):
-    return os.path.realpath(os.path.expanduser(p))
+    """Real path with "/" as the separator on every OS (Windows accepts "/"), so one set of rules fits all."""
+    r = os.path.realpath(os.path.expanduser(p))
+    return r.replace("\\", "/") if WINDOWS else r
+
+
+def path_key(p):
+    """rp() for comparing paths: Windows paths are case-insensitive."""
+    r = rp(p)
+    return r.lower() if WINDOWS else r
 
 
 def in_zone(path, roots):
-    r = rp(path)
-    return any(r == rp(z) or r.startswith(rp(z).rstrip("/") + "/") for z in roots if z)
+    r = path_key(path)
+    return any(r == path_key(z) or r.startswith(path_key(z).rstrip("/") + "/") for z in roots if z)
+
+
+def read_allowed(path):
+    """allowed-paths.txt as a set of path_key() values (empty set if the file is missing)."""
+    if not os.path.exists(path):
+        return set()
+    with open(path, encoding="utf-8") as f:
+        return {path_key(l.strip()) for l in f if l.strip()}
+
+
+def lock_exclusive(f):
+    """Block until this process holds an exclusive lock on the open file f (fcntl, or msvcrt on Windows)."""
+    try:
+        import fcntl
+        fcntl.flock(f, fcntl.LOCK_EX)
+    except ImportError:
+        import msvcrt
+        while True:
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)  # retries for about 10 s, then raises
+                return
+            except OSError:
+                continue
+
+
+def split_command(cmd):
+    """A configured command line as a list. On Windows, backslashes in paths are kept (shlex would eat them)."""
+    if not WINDOWS:
+        return shlex.split(cmd)
+    return [t[1:-1] if len(t) >= 2 and t[0] == t[-1] and t[0] in "\"'" else t for t in shlex.split(cmd, posix=False)]
 
 
 def protected_zones(include_wiki=True):
@@ -123,4 +172,4 @@ def path_markers():
         parts = [p for p in rp(z).split("/") if p][-2:]
         if len(parts) == 2:
             frags.append(re.escape("/".join(parts)))
-    return re.compile("(" + "|".join(frags) + ")")
+    return re.compile("(" + "|".join(frags) + ")", re.I if WINDOWS else 0)

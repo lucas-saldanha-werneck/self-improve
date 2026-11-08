@@ -1,6 +1,5 @@
-import os, stat
 from datetime import datetime
-from conftest import run, HR
+from conftest import run, HR, py_command
 
 NAME = f"REVIEW {datetime.now():%d-%m}"
 EXEC_NAME = f"EXEC {datetime.now():%d-%m}"
@@ -8,10 +7,10 @@ EXEC_NAME = f"EXEC {datetime.now():%d-%m}"
 
 def fake_launcher(env):
     log = env["tmp"] / "launcher.args"
-    fake = env["tmp"] / "launcher"
-    fake.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{log}'\necho 'session opened'\n")
-    fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
-    env["env"].update(SELF_IMPROVE_LAUNCH_COMMAND=f"{fake} . --tmux --name {{name}} --prompt {{prompt}}",
+    fake = env["tmp"] / "launcher.py"
+    fake.write_text(f"import sys\nopen({str(log)!r}, 'w', encoding='utf-8').write(''.join(a + '\\n' for a in sys.argv[1:]))\n"
+                    "print('session opened')\n")
+    env["env"].update(SELF_IMPROVE_LAUNCH_COMMAND=f"{py_command(fake)} . --tmux --name {{name}} --prompt {{prompt}}",
                       HUMAN_REVIEW_AGENTS_JSON="[]")
     return log
 
@@ -62,10 +61,9 @@ def test_launch_dry_run_passes_flag(env):
 
 def test_launch_failure_exits_nonzero(env):
     fake_launcher(env)
-    bad = env["tmp"] / "bad-launcher"
-    bad.write_text("#!/bin/sh\necho nope >&2\nexit 3\n")
-    bad.chmod(0o755)
-    env["env"]["SELF_IMPROVE_LAUNCH_COMMAND"] = f"{bad} {{name}}"
+    bad = env["tmp"] / "bad-launcher.py"
+    bad.write_text("import sys\nsys.stderr.write('nope')\nsys.exit(3)\n")
+    env["env"]["SELF_IMPROVE_LAUNCH_COMMAND"] = f"{py_command(bad)} {{name}}"
     r = run(env, "launch", script=HR, ok=False)
     assert r.returncode == 1 and "review: failed to open" in r.stdout
 

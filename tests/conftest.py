@@ -79,7 +79,8 @@ def env(tmp_path):
 
 
 def run(env, *args, script=IS, ok=True, stdin=None):
-    r = subprocess.run([sys.executable, script, *args], capture_output=True, text=True, env=env["env"], input=stdin)
+    r = subprocess.run([sys.executable, script, *args], capture_output=True, text=True, encoding="utf-8",
+                       env=env["env"], input=stdin)
     if ok:
         assert r.returncode == 0, r.stdout + r.stderr
     return r
@@ -87,9 +88,14 @@ def run(env, *args, script=IS, ok=True, stdin=None):
 
 def pyeval(env, code):
     r = subprocess.run([sys.executable, "-c", f"import sys; sys.path.insert(0, {SCRIPTS!r}); {code}"],
-                       capture_output=True, text=True, env=env["env"])
+                       capture_output=True, text=True, encoding="utf-8", env=env["env"])
     assert r.returncode == 0, r.stderr
     return r.stdout.strip()
+
+
+def py_command(script):
+    """A command line that runs a Python script, on every OS (Windows can't run a #!/bin/sh file)."""
+    return f'"{sys.executable}" "{script}"'
 
 
 def last_run_dir(env):

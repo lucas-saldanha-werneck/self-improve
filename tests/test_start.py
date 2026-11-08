@@ -1,7 +1,7 @@
 """A real `start` on a plain install: fake transcripts in an isolated CLAUDE_CONFIG_DIR, no wiki."""
 import json
 from datetime import datetime, timedelta, timezone
-from conftest import run, last_run_dir
+from conftest import run, last_run_dir, py_command
 
 
 def ts(minutes_ago):
@@ -96,9 +96,8 @@ def test_notify_not_configured_is_a_noop(env):
 
 def test_notify_runs_command(env):
     log = env["tmp"] / "notify.txt"
-    script = env["tmp"] / "notify.sh"
-    script.write_text(f"#!/bin/sh\nprintf '%s' \"$1\" > '{log}'\n")
-    script.chmod(0o755)
-    env["env"]["SELF_IMPROVE_NOTIFY_COMMAND"] = str(script)
+    script = env["tmp"] / "notify.py"
+    script.write_text(f"import sys\nopen({str(log)!r}, 'w', encoding='utf-8').write(sys.argv[1])\n")
+    env["env"]["SELF_IMPROVE_NOTIFY_COMMAND"] = py_command(script)
     assert "notify: sent" in run(env, "notify", "hello there").stdout
     assert log.read_text() == "hello there"

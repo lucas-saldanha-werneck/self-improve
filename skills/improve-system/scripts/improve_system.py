@@ -26,14 +26,9 @@ State lives outside the plugin (see si_config.py): SI_HOME/history.jsonl, SI_HOM
 SI_HOME/active-run.json (the lock guard.py reads). Your files: OUT/review-*, needs-context-*, change-log.md.
 Only a run closed with `finish` moves the window. An aborted run leaves the next window unchanged.
 """
-import argparse, glob, json, os, re, shlex, subprocess, sys, time, unicodedata
+import argparse, glob, json, os, re, subprocess, sys, time, unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
-
-try:
-    import fcntl
-except ImportError:  # Windows: no file lock (same as human_review `mark`)
-    fcntl = None
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import si_config as C  # noqa: E402
@@ -134,12 +129,12 @@ def norm(s):
 def read_history():
     if not os.path.exists(HISTORY):
         return []
-    return [json.loads(l) for l in open(HISTORY) if l.strip()]
+    return [json.loads(l) for l in open(HISTORY, encoding="utf-8") if l.strip()]
 
 
 def append_history(ev):
     os.makedirs(STATE, exist_ok=True)
-    with open(HISTORY, "a") as f:
+    with open(HISTORY, "a", encoding="utf-8") as f:
         f.write(json.dumps(ev, ensure_ascii=False) + "\n")
 
 
@@ -154,12 +149,12 @@ def run_dir(run_id):
 
 
 def jdump(obj, path):
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=1)
 
 
 def jload(path, default):
-    return json.load(open(path)) if os.path.exists(path) else default
+    return json.load(open(path, encoding="utf-8")) if os.path.exists(path) else default
 
 
 def short(p):
@@ -220,7 +215,7 @@ def extract(f, since, until, stats):
     after_interrupt, since_skill = False, 0
     SKILL_TTL = 15  # after 15 user messages, friction is no longer blamed on a skill called long ago
     sid = os.path.basename(f)[:-6]
-    for line in open(f, errors="ignore"):
+    for line in open(f, errors="ignore", encoding="utf-8"):
         try:
             d = json.loads(line)
         except Exception:
@@ -337,7 +332,7 @@ def repeats(msgs):
 
 def desc_of(p):
     try:
-        t = open(p, errors="ignore").read()
+        t = open(p, errors="ignore", encoding="utf-8").read()
     except Exception:
         return ""
     m = re.search(r"^description:\s*(.+)$", t, re.M)
@@ -427,7 +422,7 @@ def wiki_log_entries(since):
     for p in [os.path.join(WIKI, "log.md")] + sorted(glob.glob(os.path.join(WIKI, "log/*.md"))):
         if not os.path.exists(p):
             continue
-        for line in open(p, errors="ignore"):
+        for line in open(p, errors="ignore", encoding="utf-8"):
             m = re.match(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]\s*(.+)", line)
             if m and m.group(1) >= since.astimezone().strftime("%Y-%m-%d"):
                 rows.append(f"{m.group(1)} {m.group(2).strip()}  ({short(p)})")
@@ -442,6 +437,7 @@ QUOTED = re.compile(r'"[^"\n]*"|“[^”\n]*”|`[^`\n]*`|^[ \t]*>.*$', re.M)  #
 
 
 def wiki_skipped(p):
+    p = p.replace(os.sep, "/")
     if "/log/" in p:
         return True
     return any(f"/{d.strip('/')}/" in p for d in C.opt("wiki_auto_dirs") if d)
@@ -459,7 +455,7 @@ def lint_wiki(add):
     inbound = Counter()
     root = os.path.dirname(WIKI)
     for p in pages:
-        txt = open(p, errors="ignore").read()
+        txt = open(p, errors="ignore", encoding="utf-8").read()
         base = os.path.dirname(p)
         for m in LINK_WIKI.finditer(txt):
             n = m.group(1).strip()
@@ -490,7 +486,7 @@ def lint_wiki(add):
             break
     idx = os.path.join(WIKI, "INDEX.md")
     if os.path.exists(idx):  # INDEX checks only when the wiki has one
-        idx_txt = open(idx, errors="ignore").read()
+        idx_txt = open(idx, errors="ignore", encoding="utf-8").read()
         idx_links = {os.path.normpath(os.path.join(WIKI, t)) for t, _ in LINK_MD.findall(idx_txt)} | \
                     {os.path.normpath(names.get(m.group(1).strip(), os.path.join(WIKI, m.group(1).strip() + ".md")))
                      for m in LINK_WIKI.finditer(idx_txt)}
@@ -526,7 +522,7 @@ def lint(skill_stats_30d):
     for owner, p in skill_files():
         if owner != "own-skill":
             continue
-        txt = open(p, errors="ignore").read()
+        txt = open(p, errors="ignore", encoding="utf-8").read()
         d = os.path.dirname(p)
         name = os.path.basename(d)
         if not re.search(r"^name:\s*\S", txt, re.M) or not re.search(r"^description:\s*\S", txt, re.M):
@@ -566,7 +562,7 @@ def lint(skill_stats_30d):
         idxp = os.path.join(mem, "MEMORY.md")
         if not os.path.exists(idxp):
             continue
-        itx = open(idxp, errors="ignore").read()
+        itx = open(idxp, errors="ignore", encoding="utf-8").read()
         linked = set(re.findall(r"\]\(([^)]+\.md)\)", itx))
         files = {os.path.basename(p) for p in glob.glob(os.path.join(mem, "*.md"))} - {"MEMORY.md"}
         for f in sorted(linked - files):
@@ -608,7 +604,7 @@ def resolved_ids(hist):
     done = set()
     for f in glob.glob(os.path.join(STATE, "runs", "*", "applied.jsonl")):
         rid = os.path.basename(os.path.dirname(f))
-        for l in open(f):
+        for l in open(f, encoding="utf-8"):
             try:
                 x = json.loads(l)["id"]
             except Exception:
@@ -630,7 +626,7 @@ def parse_reviews(hist):
         if f in done:
             continue
         files.append(f)
-        lines = open(f, errors="ignore").read().splitlines()
+        lines = open(f, errors="ignore", encoding="utf-8").read().splitlines()
         for i, line in enumerate(lines):
             m = ITEM_RE.match(line)
             if not m:
@@ -671,7 +667,7 @@ def parse_reviews(hist):
             continue
         files.append(f)
         cur = None
-        for line in open(f, errors="ignore").read().splitlines():
+        for line in open(f, errors="ignore", encoding="utf-8").read().splitlines():
             h = ANS_HEAD_RE.match(line)
             if h:
                 if cur:
@@ -747,9 +743,9 @@ def targets_to_allow(items):
 
 def write_allow(rd, extra):
     p = os.path.join(rd, "allowed-paths.txt")
-    cur = set(open(p).read().split("\n")) if os.path.exists(p) else set()
+    cur = set(open(p, encoding="utf-8").read().split("\n")) if os.path.exists(p) else set()
     cur = {c for c in cur if c} | extra
-    open(p, "w").write("\n".join(sorted(cur)) + "\n")
+    open(p, "w", encoding="utf-8").write("\n".join(sorted(cur)) + "\n")
     return sorted(cur)
 
 
@@ -762,7 +758,7 @@ def write_lock(run_id, rd):
         sess, owner = s.get("session_id"), s.get("owner_pid")
     # O_EXCL: two `start` at once -> only one gets the lock
     fd = os.open(LOCK, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
-    with os.fdopen(fd, "w") as f:
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
         json.dump({"run_id": run_id, "run_dir": rd, "session_id": sess, "owner_pid": owner,
                    "started_epoch": time.time()}, f)
     return sess
@@ -777,7 +773,7 @@ def cmd_start(a):
         sys.exit(3)
     if os.path.exists(LOCK):
         try:
-            lk = json.load(open(LOCK))
+            lk = json.load(open(LOCK, encoding="utf-8"))
         except Exception:
             lk = {"run_id": "?"}
         if not a.force:
@@ -845,7 +841,7 @@ def cmd_start(a):
         extract(f, since30, until, stats30)
     evs.sort(key=lambda e: (e["session"], e["ts"]))
     msgs = [e for e in evs if e["kind"] == "message"]
-    with open(os.path.join(rd, "events.jsonl"), "w") as fo:
+    with open(os.path.join(rd, "events.jsonl"), "w", encoding="utf-8") as fo:
         for e in evs:
             fo.write(json.dumps(e, ensure_ascii=False) + "\n")
 
@@ -879,18 +875,18 @@ def cmd_start(a):
     if cur:
         chunks.append(cur)
     for i, c in enumerate(chunks, 1):
-        with open(os.path.join(rd, f"chunk-{i:02d}.md"), "w") as fo:
+        with open(os.path.join(rd, f"chunk-{i:02d}.md"), "w", encoding="utf-8") as fo:
             fo.write("".join(c))
 
     reps = repeats(msgs)
-    with open(os.path.join(rd, "repeats.md"), "w") as fo:
+    with open(os.path.join(rd, "repeats.md"), "w", encoding="utf-8") as fo:
         fo.write("# Near-identical messages (2+ times)\n")
         for g in reps:
             fo.write(f"\n## {len(g)}x in {len({m['session'] for m in g})} sessions\n")
             for m in g[:6]:
                 fo.write(f"- [{m['ts']}] {m['session'][:8]} skill={m['skill'] or '-'}: {m['text'][:200]!r}\n")
 
-    with open(os.path.join(rd, "friction.md"), "w") as fo:
+    with open(os.path.join(rd, "friction.md"), "w", encoding="utf-8") as fo:
         fo.write("# Friction per skill in the window\n\n"
                  "| skill | uses | tool errors | Esc | rejections | messages that look like corrections | uses 30d |\n"
                  "|---|---|---|---|---|---|---|\n")
@@ -902,7 +898,7 @@ def cmd_start(a):
     # 3. what changed / what came in
     ch = changed_files(since, until)
     logs = wiki_log_entries(since)
-    with open(os.path.join(rd, "changes.md"), "w") as fo:
+    with open(os.path.join(rd, "changes.md"), "w", encoding="utf-8") as fo:
         fo.write(f"# Changes and new data {iso(since)} -> {iso(until)}\n")
         for label, rows in ch.items():
             fo.write(f"\n## {label} ({len(rows)})\n")
@@ -916,7 +912,7 @@ def cmd_start(a):
     # 4. lint
     lt = lint({k: v for k, v in stats30.items()})
     jdump(lt, os.path.join(rd, "lint.json"))
-    with open(os.path.join(rd, "lint.md"), "w") as fo:
+    with open(os.path.join(rd, "lint.md"), "w", encoding="utf-8") as fo:
         fo.write("# Deterministic lint (machine findings: check before proposing)\n\n"
                  "| kind | can be AUTO? | target | detail |\n|---|---|---|---|\n")
         for it in lt:
@@ -936,7 +932,7 @@ def cmd_start(a):
         changed = {p for _, p in ch.get("wiki", [])}
         nb = set(changed)
         for p in all_pages:
-            t = open(p, errors="ignore").read()
+            t = open(p, errors="ignore", encoding="utf-8").read()
             links = {m.group(1).strip() for m in LINK_WIKI.finditer(t)} | \
                     {os.path.splitext(os.path.basename(x))[0] for x, _ in LINK_MD.findall(t)}
             stem = os.path.splitext(os.path.basename(p))[0]
@@ -947,7 +943,7 @@ def cmd_start(a):
         wiki_pages = [p for p in all_pages if p in nb]
     wchunks, cur, size = [], [], 0
     for p in wiki_pages:
-        t = open(p, errors="ignore").read()
+        t = open(p, errors="ignore", encoding="utf-8").read()
         mt = datetime.fromtimestamp(os.path.getmtime(p)).strftime('%Y-%m-%d')
         block = f"\n\n===== FILE: {short(p)}  (mtime {mt}) =====\n{t}"
         if cur and size + len(block) > CHUNK_BYTES:
@@ -958,18 +954,18 @@ def cmd_start(a):
     if cur:
         wchunks.append(cur)
     for i, c in enumerate(wchunks, 1):
-        with open(os.path.join(rd, f"wiki-{i:02d}.md"), "w") as fo:
+        with open(os.path.join(rd, f"wiki-{i:02d}.md"), "w", encoding="utf-8") as fo:
             fo.write("".join(c))
 
     cwds = sorted({e["cwd"] for e in evs if e.get("cwd")})
-    with open(os.path.join(rd, "inventory.md"), "w") as fo:
+    with open(os.path.join(rd, "inventory.md"), "w", encoding="utf-8") as fo:
         fo.write("# Possible edit targets\n\n| owner | file | description |\n|---|---|---|\n")
         for owner, p, dsc in inventory(cwds):
             fo.write(f"| {owner} | {p} | {dsc.replace('|', '/')} |\n")
         fo.write("\nPlugin skills and linked (imported) skills are NOT edit targets: an update overwrites them. "
                  "Propose an override in your own skill, or a hook, instead.\n")
 
-    with open(os.path.join(rd, "previously-rejected.md"), "w") as fo:
+    with open(os.path.join(rd, "previously-rejected.md"), "w", encoding="utf-8") as fo:
         fo.write("# Proposals already rejected (do not propose again without new evidence)\n")
         for e in hist:
             if e["event"] == "finish":
@@ -1001,7 +997,7 @@ def cmd_render(a):
     plan_p = os.path.join(rd, "plan.json")
     if not os.path.exists(plan_p):
         sys.exit(f"missing {plan_p}")
-    plan = json.load(open(plan_p))
+    plan = json.load(open(plan_p, encoding="utf-8"))
     errs, seen = [], Counter()
     for it in plan:
         b = it.get("bucket")
@@ -1042,7 +1038,7 @@ def cmd_render(a):
                 errs.append(f"{it['title']}: 'patch' needs old (not empty) and new, both text")
             elif t0.startswith("new:") or not os.path.isfile(t0):
                 errs.append(f"{it['title']}: 'patch' only works on a target that exists ({it.get('target')})")
-            elif open(t0, errors="ignore").read().count(pt["old"]) != 1:
+            elif open(t0, errors="ignore", encoding="utf-8").read().count(pt["old"]) != 1:
                 errs.append(f"{it['title']}: 'patch.old' must appear exactly once in {short(t0)}")
     n_sign = sum(1 for i in plan if i.get("bucket") == "signoff")
     if n_sign > MAX_SIGNOFF:
@@ -1051,7 +1047,7 @@ def cmd_render(a):
     if errs:
         sys.exit("plan.json refused:\n- " + "\n- ".join(errs))
     if os.path.exists(os.path.join(rd, "applied.jsonl")) and any(
-            json.loads(l)["id"].startswith(f"{a.run_id}/") for l in open(os.path.join(rd, "applied.jsonl"))):
+            json.loads(l)["id"].startswith(f"{a.run_id}/") for l in open(os.path.join(rd, "applied.jsonl"), encoding="utf-8")):
         sys.exit("this run already applied AUTO items. It can't be rendered again (the ids would change). "
                  "A new item waits for the next run.")
     for it in plan:  # stable ids per bucket
@@ -1109,7 +1105,7 @@ def cmd_render(a):
                 c.setdefault("carried_since", c.get("run_id", "")[:8])
                 body.append(item_md(c, c["run_id"]))
             body.append("")
-        open(p, "w").write("\n".join(body))
+        open(p, "w", encoding="utf-8").write("\n".join(body))
         out["review"] = p
     if ctx or open_q:
         p = os.path.join(OUT, f"needs-context-{suffix}.md")
@@ -1124,7 +1120,7 @@ def cmd_render(a):
             if it.get("evidence"):
                 body += [f"Why I ask: {it['evidence']}", ""]
             body += ["**Answer:** ", "", "---", ""]
-        open(p, "w").write("\n".join(body))
+        open(p, "w", encoding="utf-8").write("\n".join(body))
         out["needs_context"] = p
     allow = write_allow(rd, targets_to_allow(auto))
     digests = {f"{a.run_id}/{i['id']}": item_digest(i) for i in signoff}
@@ -1176,7 +1172,7 @@ def sha256_of(path):
 def record_intent(run_id, key, target):
     """BEFORE editing: keep the target's hash. If the session dies between the edit and `log`, the next start
     sees the target changed since the intent and flags the item `possibly_applied` (never apply twice)."""
-    with open(os.path.join(run_dir(run_id), "intents.jsonl"), "a") as f:
+    with open(os.path.join(run_dir(run_id), "intents.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps({"id": key, "target": rp(target), "sha256_before": sha256_of(target),
                             "ts": iso(now_utc())}, ensure_ascii=False) + "\n")
 
@@ -1184,7 +1180,7 @@ def record_intent(run_id, key, target):
 def flag_possibly_applied(approved):
     last = {}
     for p in sorted(glob.glob(os.path.join(STATE, "runs", "*", "intents.jsonl"))):
-        for l in open(p):
+        for l in open(p, encoding="utf-8"):
             if l.strip():
                 x = json.loads(l)
                 if x["ts"] >= last.get(x["id"], {}).get("ts", ""):
@@ -1231,11 +1227,11 @@ def cmd_apply_patch(a):
     if not isinstance(patch, dict) or not isinstance(patch.get("old"), str) or not isinstance(patch.get("new"), str):
         sys.exit(f"{key} has no 'patch' {{old, new}}. Apply it the normal way (edit + log)")
     target = os.path.expanduser(it.get("target", ""))
-    allow_p = os.path.join(run_dir(a.run_id), "allowed-paths.txt")
-    allow = {l.strip() for l in open(allow_p) if l.strip()} if os.path.exists(allow_p) else set()
-    if rp(target) not in allow or rp(target) not in ok_paths:
+    allow = C.read_allowed(os.path.join(run_dir(a.run_id), "allowed-paths.txt"))
+    if C.path_key(target) not in allow or rp(target) not in ok_paths:
         sys.exit(f"{short(target)} is not released in this run")
-    text = open(target).read() if os.path.isfile(target) else None
+    # newline="": keep the file's own line endings (Windows would turn \n into \r\n on write)
+    text = open(target, encoding="utf-8", newline="").read() if os.path.isfile(target) else None
     n = text.count(patch["old"]) if text is not None else 0
     if n != 1:
         print(f"{key}: the 'old' text appears {n} time(s) in {short(target)}. The target changed; nothing was touched",
@@ -1248,10 +1244,10 @@ def cmd_apply_patch(a):
     record_intent(a.run_id, key, target)
     bak = do_backup(a.run_id, target)
     tmp = f"{target}.tmp-{os.getpid()}"
-    with open(tmp, "w") as fo:
+    with open(tmp, "w", encoding="utf-8", newline="") as fo:
         fo.write(new_text)
     os.replace(tmp, target)
-    if open(target).read() != new_text:
+    if open(target, encoding="utf-8", newline="").read() != new_text:
         sys.exit(f"{short(target)} does not match the patch. Restore it from {bak}")
     cmd_log(argparse.Namespace(run_id=a.run_id, id=key, target=target, backup=bak, removed=False,
                                superseded_by=None, summary=f"exact patch ({len(patch['old'])}->{len(patch['new'])} chars)"))
@@ -1277,15 +1273,15 @@ def cmd_log(a):
         import hashlib
         digest = hashlib.sha256(open(os.path.expanduser(a.target), "rb").read()).hexdigest()[:16]
     os.makedirs(OUT, exist_ok=True)
-    txt = open(CHANGELOG).read() if os.path.exists(CHANGELOG) else \
+    txt = open(CHANGELOG, encoding="utf-8").read() if os.path.exists(CHANGELOG) else \
         "# Change log (improve-system)\n\nOne line per applied change. Newest at the bottom. Local time.\n"
     head = f"## {datetime.now().strftime('%Y-%m-%d')}, run {a.run_id}"
     if head not in txt:
         txt = txt.rstrip("\n") + f"\n\n{head}\n\n"
     line = (f"- {datetime.now().strftime('%H:%M')} · {label} · {key} · `{short(a.target)}`: {a.summary}"
             + (f" (backup `{short(a.backup)}`)" if a.backup else "") + "\n")
-    open(CHANGELOG, "w").write(txt + line)
-    with open(os.path.join(rd, "applied.jsonl"), "a") as f:
+    open(CHANGELOG, "w", encoding="utf-8").write(txt + line)
+    with open(os.path.join(rd, "applied.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps({"id": key, "bucket": it.get("bucket"), "target": a.target, "summary": a.summary,
                             "backup": a.backup, "sha256_after": digest, "ts": iso(now_utc()),
                             **({"superseded_by": a.superseded_by} if a.superseded_by else {})},
@@ -1321,7 +1317,7 @@ def cmd_finish(a):
         sys.exit(f"run {a.run_id} is already closed")
     rd = run_dir(a.run_id)
     ap = os.path.join(rd, "applied.jsonl")
-    applied = [json.loads(l) for l in open(ap)] if os.path.exists(ap) else []
+    applied = [json.loads(l) for l in open(ap, encoding="utf-8")] if os.path.exists(ap) else []
     done_ids = {x["id"] for x in applied}
     approved = jload(os.path.join(rd, "approved.json"), [])
     plan = jload(os.path.join(rd, "plan.json"), [])
@@ -1342,9 +1338,8 @@ def cmd_finish(a):
     # same lock as human_review `mark`: a mark lands either before this check (file stays open) or after
     # the finish event (mark refuses a consumed file). Nothing recorded in between is lost.
     os.makedirs(STATE, exist_ok=True)
-    with open(os.path.join(STATE, "mark.lock"), "w") as lk:
-        if fcntl:
-            fcntl.flock(lk, fcntl.LOCK_EX)
+    with open(os.path.join(STATE, "mark.lock"), "w", encoding="utf-8") as lk:
+        C.lock_exclusive(lk)
         _finish_locked(a, rd, done_ids, plan, rejected_now, missing, keep_open, consumed)
     if not a.no_review and not jload(os.path.join(rd, "meta.json"), {}).get("apply_only"):
         launch_review()
@@ -1359,7 +1354,7 @@ def _finish_locked(a, rd, done_ids, plan, rejected_now, missing, keep_open, cons
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M")
     for f in consumed:  # mark the old review as read (pending items were already copied to the new one)
         if os.path.exists(f):
-            with open(f, "a") as fo:
+            with open(f, "a", encoding="utf-8") as fo:
                 fo.write(f"\n> Read on {stamp} by run `{a.run_id}`. New marks here no longer count. "
                          f"Use the newest review.\n")
     ev = {"event": "finish", "run_id": a.run_id, "finished_at": iso(now_utc()),
@@ -1381,7 +1376,7 @@ def do_abort(run_id, note):
     append_history({"event": "abort", "run_id": run_id, "at": iso(now_utc()), "note": note})
     if os.path.exists(LOCK):
         try:
-            same = json.load(open(LOCK)).get("run_id") == run_id
+            same = json.load(open(LOCK, encoding="utf-8")).get("run_id") == run_id
         except Exception:
             same = True  # unreadable lock: aborting is the way out of it
         if same:
@@ -1397,10 +1392,9 @@ def cmd_backup(a):
 def do_backup(run_id, path):
     import shutil
     require_active(run_id)
-    allow = {l.strip() for l in open(os.path.join(run_dir(run_id), "allowed-paths.txt")) if l.strip()} \
-        if os.path.exists(os.path.join(run_dir(run_id), "allowed-paths.txt")) else set()
+    allow = C.read_allowed(os.path.join(run_dir(run_id), "allowed-paths.txt"))
     src = os.path.expanduser(path)
-    if rp(src) not in allow:
+    if C.path_key(src) not in allow:
         sys.exit(f"{path} is not released in this run. Backup only works on an approved/AUTO target")
     if not os.path.isfile(src):
         sys.exit(f"{path} does not exist (a new target needs no backup)")
@@ -1424,7 +1418,7 @@ def cmd_abort(a):
     if not os.path.exists(LOCK):
         sys.exit("no active run")
     try:
-        lk = json.load(open(LOCK))
+        lk = json.load(open(LOCK, encoding="utf-8"))
     except Exception:
         if not a.corrupt_lock:
             sys.exit("unreadable lock. To unlock anyway: `abort RUN_ID --corrupt-lock` (user only)")
@@ -1442,7 +1436,7 @@ def cmd_notify(a):
         print(f"notify: not configured ({a.text})")
         return
     try:
-        r = subprocess.run(shlex.split(cmd) + [a.text], capture_output=True, text=True, timeout=60)
+        r = subprocess.run(C.split_command(cmd) + [a.text], capture_output=True, text=True, timeout=60)
         print(f"notify: {'sent' if r.returncode == 0 else 'failed: ' + (r.stderr or r.stdout).strip()[:200]}")
     except Exception as e:
         print(f"notify: failed ({e})")
@@ -1476,7 +1470,7 @@ def cmd_status(a):
                               glob.glob(os.path.join(OUT, "needs-context-*.md"))) if f not in done]
     print("reviews waiting for you:" if pend else "no review waiting.")
     for f in pend:
-        t = open(f, errors="ignore").read()
+        t = open(f, errors="ignore", encoding="utf-8").read()
         n_appr = len(re.findall(r"^- \[[xX]\]", t, re.M))
         n_rej = len(re.findall(r"^- \[-\]", t, re.M))
         n_open = len(re.findall(r"^- \[ \]", t, re.M))

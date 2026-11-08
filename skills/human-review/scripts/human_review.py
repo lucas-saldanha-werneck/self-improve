@@ -12,7 +12,7 @@ Subcommands:
                        No launch_command = prints what to run and exits 0.
 Reads and writes the same review-*.md / needs-context-*.md as improve_system.py (same settings).
 """
-import argparse, json, os, re, shlex, shutil, subprocess, sys
+import argparse, json, os, re, shutil, subprocess, sys
 from datetime import datetime
 
 IS_DIR = os.environ.get("IMPROVE_SYSTEM_SCRIPTS") or os.path.join(
@@ -20,11 +20,6 @@ IS_DIR = os.environ.get("IMPROVE_SYSTEM_SCRIPTS") or os.path.join(
 sys.path.insert(0, IS_DIR)
 import improve_system as isys  # noqa: E402
 import si_config as C  # noqa: E402
-
-try:
-    import fcntl
-except ImportError:  # Windows: no file lock; two marks at the same moment are unlikely
-    fcntl = None
 
 PROMPTS = {"review": "/self-improve:human-review answer", "exec": "/self-improve:execute-reviewed"}
 NAMES = {"review": "REVIEW", "exec": "EXEC"}
@@ -58,16 +53,15 @@ def cmd_items(a):
 
 def cmd_mark(a):
     f = os.path.realpath(a.file)
-    if not f.startswith(os.path.realpath(isys.OUT) + os.sep) or not os.path.isfile(f):
+    if not C.path_key(f).startswith(C.path_key(isys.OUT) + "/") or not os.path.isfile(f):
         sys.exit(f"{a.file} is not a file in {isys.OUT}")
     if (a.answer is None) == (a.choice is None):
         sys.exit("use --choice or --answer (one of them)")
     if "/" not in a.ref:
         sys.exit(f"--ref must be RUN/ID (got {a.ref!r})")
     os.makedirs(isys.STATE, exist_ok=True)
-    with open(os.path.join(isys.STATE, "mark.lock"), "w") as lk:  # 2 marks at once: one waits for the other
-        if fcntl:
-            fcntl.flock(lk, fcntl.LOCK_EX)
+    with open(os.path.join(isys.STATE, "mark.lock"), "w", encoding="utf-8") as lk:  # 2 marks at once: one waits for the other
+        C.lock_exclusive(lk)
         _mark_locked(a, f)
 
 
@@ -78,7 +72,7 @@ def _mark_locked(a, f):
                  f"(the item is in the newest review)")
     rid, iid = a.ref.split("/", 1)
     tag = re.compile(r"<!--\s*" + re.escape(rid) + "/" + re.escape(iid) + r"\s*-->")
-    lines = open(f, errors="ignore").read().splitlines()
+    lines = open(f, errors="ignore", encoding="utf-8").read().splitlines()
     idx = next((i for i, l in enumerate(lines) if tag.search(l)), None)
     if idx is None:
         sys.exit(f"{a.ref} not found in {a.file}")
@@ -105,7 +99,7 @@ def _mark_locked(a, f):
             block.append(f"    - Note: {one_line(a.note)}")
         lines[idx + 1:end] = block
     tmp = os.path.join(os.path.dirname(f), f".{os.path.basename(f)}.tmp-{os.getpid()}")
-    with open(tmp, "w") as fo:  # whole file or nothing: a crash halfway does not truncate the review
+    with open(tmp, "w", encoding="utf-8") as fo:  # whole file or nothing: a crash halfway does not truncate the review
         fo.write("\n".join(lines) + "\n")
         fo.flush()
         os.fsync(fo.fileno())
@@ -148,7 +142,7 @@ def cmd_launch(a):
         print(f"{kind}: {already} already open")
         return
     try:
-        parts = shlex.split(template)
+        parts = C.split_command(template)
     except ValueError as e:
         print(f"{kind}: launch_command can't be parsed ({e})")
         sys.exit(1)
