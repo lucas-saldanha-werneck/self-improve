@@ -2,10 +2,14 @@
 
 Where things live:
   CLAUDE_HOME   $CLAUDE_CONFIG_DIR, else ~/.claude (sessions are read from CLAUDE_HOME/projects/*/*.jsonl)
-  SI_HOME       $SELF_IMPROVE_HOME, else CLAUDE_HOME/self-improve (run state, history, backups, config.json)
+  SI_HOME       $SELF_IMPROVE_HOME, else CLAUDE_HOME/self-improve (run state, history, backups)
+  CONFIG_FILE   $SELF_IMPROVE_HOME/config.json when SELF_IMPROVE_HOME is set, else
+                $XDG_CONFIG_HOME/self-improve/config.json (default ~/.config/self-improve/config.json).
+                If that file is missing but the old CLAUDE_HOME/self-improve/config.json exists, the old one
+                is read (and nothing new is created over it); when both exist, the new one wins.
   OUT           review-*.md, needs-context-*.md, change-log.md (option output_dir, default SI_HOME/reviews)
 
-Options come from SI_HOME/config.json; an environment variable SELF_IMPROVE_<NAME> wins over the file.
+Options come from CONFIG_FILE; an environment variable SELF_IMPROVE_<NAME> wins over the file.
 That file lives outside the plugin folder, so your settings survive plugin updates. seed_config() creates
 it from config.example.json on first run (every option at its default); an existing file is never touched.
 List options read from the environment are separated by os.pathsep (":" on macOS/Linux).
@@ -19,7 +23,24 @@ import shlex
 HOME = os.path.expanduser("~")
 CLAUDE_HOME = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(HOME, ".claude"))
 SI_HOME = os.path.expanduser(os.environ.get("SELF_IMPROVE_HOME") or os.path.join(CLAUDE_HOME, "self-improve"))
-CONFIG_FILE = os.path.join(SI_HOME, "config.json")
+
+
+def _config_files():
+    """(file to read, file to create when missing or None). See the module docstring."""
+    if (os.environ.get("SELF_IMPROVE_HOME") or "").strip():
+        f = os.path.join(SI_HOME, "config.json")
+        return f, f
+    xdg = os.path.expanduser((os.environ.get("XDG_CONFIG_HOME") or "").strip())
+    if not os.path.isabs(xdg):  # unset, or relative (the XDG spec says to ignore that)
+        xdg = os.path.join(HOME, ".config")
+    new = os.path.join(xdg, "self-improve", "config.json")
+    legacy = os.path.join(CLAUDE_HOME, "self-improve", "config.json")
+    if not os.path.lexists(new) and os.path.isfile(legacy):
+        return legacy, None  # the old place still works; never seed a second file over it
+    return new, new
+
+
+CONFIG_FILE, _SEED_TARGET = _config_files()
 # Starter copied to CONFIG_FILE on first run: every option at its default (same behavior as no file).
 EXAMPLE_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))), "config.example.json")
@@ -66,13 +87,15 @@ def seed_config():
     an existing file (O_EXCL), never raises, prints nothing. True if it created the file.
     Run by the SessionStart hook (seed_config.py) and by improve_system.py, since installing a plugin
     runs no hook."""
+    target = _SEED_TARGET
     try:
-        if not os.path.isabs(CONFIG_FILE) or os.path.lexists(CONFIG_FILE):  # relative = the project folder
+        # no target: the old config file is in use. Relative: it would land in the project folder.
+        if not target or not os.path.isabs(target) or os.path.lexists(target):
             return False
         with open(EXAMPLE_CONFIG, "rb") as f:
             data = f.read()
-        os.makedirs(os.path.dirname(CONFIG_FILE) or ".", exist_ok=True)
-        fd = os.open(CONFIG_FILE, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
+        os.makedirs(os.path.dirname(target) or ".", exist_ok=True)
+        fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o600)
     except Exception:
         return False
     try:
@@ -81,7 +104,7 @@ def seed_config():
         return True
     except Exception:
         try:  # only the half-written file this call just created
-            os.remove(CONFIG_FILE)
+            os.remove(target)
         except Exception:
             pass
         return False
@@ -95,13 +118,20 @@ def opt(name):
             return [x for x in env.split(os.pathsep) if x.strip()]
         if isinstance(default, int):
             try:
-                return int(env)
+                v = float(env)
+                return int(v) if v.is_integer() else v
             except ValueError:
                 return default
         return env.strip()
     v = _FILE.get(name, default)
     if isinstance(default, list) and isinstance(v, str):
         v = [v] if v else []
+    if isinstance(default, int) and not isinstance(v, (int, float)):  # "5" or "1.5" in the file
+        try:
+            v = float(v)
+            v = int(v) if v.is_integer() else v
+        except (TypeError, ValueError):
+            v = default
     return v if v is not None else default
 
 
@@ -220,7 +250,8 @@ def run_user_command(name, event, extra_env=None, timeout=120):
 
 
 def protected_zones(include_wiki=True):
-    z = SKILL_ROOTS + CONFIG_PATHS + path_list("extra_protected")
+    # CONFIG_FILE too: it names programs the audited scripts run (pre_run_command, ...)
+    z = SKILL_ROOTS + CONFIG_PATHS + [CONFIG_FILE] + path_list("extra_protected")
     if include_wiki and WIKI:
         z.append(WIKI)
     return z

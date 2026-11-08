@@ -141,3 +141,26 @@ def test_claude_command_is_used_to_find_open_sessions(env):
     env["env"].update(SELF_IMPROVE_CLAUDE_COMMAND=py_command(fake),
                       SELF_IMPROVE_LAUNCH_COMMAND=f"{py_command(launcher)} {{name}} {{prompt}}")
     assert "REVIEW 01-01 already open" in run(env, "launch", script=HR).stdout
+
+
+def test_force_with_a_busy_pre_run_keeps_the_active_run(env):
+    plain_env(env)
+    first = json.loads(run(env, "start").stdout)
+    lock = env["state"] / "active-run.json"
+    before = lock.read_text(encoding="utf-8")
+    hook(env, "pre_run_command", exit_code=3)
+    r = run(env, "start", "--force", ok=False)
+    assert r.returncode == 3
+    assert lock.exists() and lock.read_text(encoding="utf-8") == before, f"run {first['run_id']} was torn down"
+    env["env"]["HOOK_EXIT"] = "0"
+    second = json.loads(run(env, "start", "--force").stdout)
+    assert second["run_id"] != first["run_id"]
+
+
+def test_wait_lock_check_gets_the_same_variables_as_a_run(env):
+    log = hook(env, "pre_run_command")
+    run(env, "wait-lock", "--max-minutes", "0")
+    c = calls(log)[-1]
+    assert c["SELF_IMPROVE_MODE"] == "check"
+    assert {"SELF_IMPROVE_WIKI_DIR", "SELF_IMPROVE_RAW_DIR", "SELF_IMPROVE_SINCE", "SELF_IMPROVE_UNTIL"} <= set(c)
+    assert c["SELF_IMPROVE_WIKI_DIR"] == str(env["wiki"])

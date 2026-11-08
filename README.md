@@ -68,13 +68,13 @@ python3 ~/.claude/plugins/cache/self-improve/self-improve/0.2.0/skills/improve-s
 
 ## Configuration
 
-Everything works without configuration. To change something, edit `~/.claude/self-improve/config.json` (see *Your settings* below). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
+Everything works without configuration. To change something, edit `~/.config/self-improve/config.json` (see *Your settings* below). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
 
-**Your settings survive plugin updates.** The config file, the run state and the reviews live in `~/.claude/self-improve/`, outside the plugin folder that an update replaces. Personal behavior goes in small scripts you point the `*_command` options at, not in the plugin's code.
+**Your settings survive plugin updates.** The config file lives in `~/.config/self-improve/`, and the run state and the reviews in `~/.claude/self-improve/`, both outside the plugin folder that an update replaces. Personal behavior goes in small scripts you point the `*_command` options at, not in the plugin's code.
 
 ### Your settings
 
-Your file is `~/.claude/self-improve/config.json` (inside `$SELF_IMPROVE_HOME` if you set it; `$CLAUDE_CONFIG_DIR` replaces `~/.claude`; on Windows `~` is `%USERPROFILE%`). You don't have to create it: the plugin writes it the first time a session starts (or the first time `improve_system.py` runs), from [`config.example.json`](config.example.json), with every option at its default and a one-line note per option under `_doc`. That file behaves exactly like having no file. Plugin updates never touch it, and an existing file is never overwritten, so edit it freely.
+Your file is `~/.config/self-improve/config.json` (`$XDG_CONFIG_HOME/self-improve/config.json` when `XDG_CONFIG_HOME` is set; `$SELF_IMPROVE_HOME/config.json` if you set `SELF_IMPROVE_HOME`; on Windows `~` is `%USERPROFILE%`). Older versions kept it in `~/.claude/self-improve/config.json` (`$CLAUDE_CONFIG_DIR` replaces `~/.claude`): while the new file does not exist, that old file is still read and nothing new is created next to it; once the new file exists, it wins. Move the old file to the new place whenever you like. You don't have to create it: the plugin writes it the first time a session starts (or the first time `improve_system.py` runs), from [`config.example.json`](config.example.json), with every option at its default and a one-line note per option under `_doc`. That file behaves exactly like having no file. Plugin updates never touch it, and an existing file is never overwritten, so edit it freely.
 
 | Key | Default | What it does |
 |---|---|---|
@@ -98,7 +98,7 @@ Your file is `~/.claude/self-improve/config.json` (inside `$SELF_IMPROVE_HOME` i
 | `ignore_message_regex` | (off) | Your messages that match are not read (for example text a hook types for you) |
 | `max_signoff` | `10` | New SIGN-OFF items per run |
 
-`SELF_IMPROVE_HOME` moves the whole state folder (default `~/.claude/self-improve`). `CLAUDE_CONFIG_DIR` is respected for where sessions, skills and config are read.
+`SELF_IMPROVE_HOME` moves the whole state folder (default `~/.claude/self-improve`), and the config file with it. `CLAUDE_CONFIG_DIR` is respected for where sessions, skills and Claude Code's own config are read.
 
 ### Commands you plug in
 
@@ -139,7 +139,7 @@ claude plugin uninstall self-improve@self-improve
 claude plugin marketplace remove self-improve
 ```
 
-Your reviews, change log, backups and run history stay in `~/.claude/self-improve`. Delete that folder if you don't want them. If you uninstall during a run, the lock file stays there too, but with the plugin gone there is no hook to enforce it.
+Your reviews, change log, backups and run history stay in `~/.claude/self-improve`, and your settings in `~/.config/self-improve`. Delete those folders if you don't want them. If you uninstall during a run, the lock file stays there too, but with the plugin gone there is no hook to enforce it.
 
 ## Limits
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""SessionStart hook: create ~/.claude/self-improve/config.json (SI_HOME/config.json) from
-config.example.json the first time, since installing a plugin runs no hook.
+"""SessionStart hook: create ~/.config/self-improve/config.json (si_config.CONFIG_FILE) from
+config.example.json the first time, since installing a plugin runs no hook. Nothing is created while the
+old ~/.claude/self-improve/config.json is the one in use.
 
 Never overwrites an existing file, prints nothing, and always exits 0 so it never blocks a session."""
 import os

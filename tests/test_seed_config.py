@@ -1,5 +1,6 @@
-"""The plugin creates SI_HOME/config.json by itself on first run (installing a plugin runs no hook):
-from the SessionStart hook and from improve_system.py. Never overwrites, never blocks a session."""
+"""The plugin creates ~/.config/self-improve/config.json by itself on first run (installing a plugin runs no
+hook): from the SessionStart hook and from improve_system.py. Never overwrites, never blocks a session.
+The old ~/.claude/self-improve/config.json is still read when the new file is missing."""
 import json, os, subprocess, sys
 
 import pytest
@@ -24,7 +25,8 @@ def home(tmp_path):
     e = minimal_env(h)
     e["USERPROFILE"] = str(h)  # Windows: ~ is USERPROFILE
     e["CLAUDE_CONFIG_DIR"] = str(tmp_path / "claude")
-    return {"env": e, "tmp": tmp_path, "cfg": tmp_path / "claude" / "self-improve" / "config.json"}
+    return {"env": e, "tmp": tmp_path, "cfg": h / ".config" / "self-improve" / "config.json",
+            "legacy": tmp_path / "claude" / "self-improve" / "config.json"}
 
 
 def seed(env):
@@ -78,12 +80,68 @@ def test_existing_file_is_never_touched(home):
 def test_env_overrides_are_respected(home):
     e = dict(home["env"], SELF_IMPROVE_HOME=str(home["tmp"] / "si"))
     seed(e)
-    assert read(home["tmp"] / "si" / "config.json") == read(EXAMPLE)
+    assert read(home["tmp"] / "si" / "config.json") == read(EXAMPLE), "SELF_IMPROVE_HOME still holds the config"
     assert not home["cfg"].exists()
+    e = dict(home["env"], XDG_CONFIG_HOME=str(home["tmp"] / "xdg"))
+    seed(e)
+    assert read(home["tmp"] / "xdg" / "self-improve" / "config.json") == read(EXAMPLE)
+    assert not home["cfg"].exists()
+    e = dict(home["env"], XDG_CONFIG_HOME="rel-xdg")  # relative: ignored, as the XDG spec says
+    seed(e)
+    assert read(home["cfg"]) == read(EXAMPLE)
+    assert not home["legacy"].exists() and not (home["tmp"] / "home" / ".claude").exists(), "nothing in the old place"
+
+
+def opts_of(env):
+    return dump(env)["opts"]
+
+
+def test_old_file_only_is_read_and_nothing_new_is_seeded(home):
+    home["legacy"].parent.mkdir(parents=True)
+    home["legacy"].write_text('{"language": "Portuguese", "max_signoff": 4}', encoding="utf-8")
+    before = (read(home["legacy"]), os.stat(home["legacy"]).st_mtime_ns)
+    seed(home["env"])
+    subprocess.run([sys.executable, IS, "status"], capture_output=True, env=home["env"])
+    assert not home["cfg"].exists(), "no new file seeded over the old one"
+    assert (read(home["legacy"]), os.stat(home["legacy"]).st_mtime_ns) == before, "old file left alone"
+    o = opts_of(home["env"])
+    assert (o["language"], o["max_signoff"]) == ("Portuguese", 4)
+    # CLAUDE_CONFIG_DIR unset: the old place is ~/.claude/self-improve
     e = dict(home["env"])
     e.pop("CLAUDE_CONFIG_DIR")
+    old = home["tmp"] / "home" / ".claude" / "self-improve" / "config.json"
+    old.parent.mkdir(parents=True)
+    old.write_text('{"language": "German"}', encoding="utf-8")
     seed(e)
-    assert read(home["tmp"] / "home" / ".claude" / "self-improve" / "config.json") == read(EXAMPLE)
+    assert not home["cfg"].exists()
+    assert opts_of(e)["language"] == "German"
+
+
+def test_new_file_only_is_read(home):
+    home["cfg"].parent.mkdir(parents=True)
+    home["cfg"].write_text('{"language": "French"}', encoding="utf-8")
+    assert opts_of(home["env"])["language"] == "French"
+    assert not home["legacy"].exists()
+
+
+def test_both_files_the_new_one_wins(home):
+    for f, lang in ((home["legacy"], "Portuguese"), (home["cfg"], "French")):
+        f.parent.mkdir(parents=True)
+        f.write_text(json.dumps({"language": lang}), encoding="utf-8")
+    seed(home["env"])
+    assert opts_of(home["env"])["language"] == "French"
+    assert json.loads(read(home["legacy"]))["language"] == "Portuguese", "old file untouched"
+
+
+def test_neither_file_seeds_the_new_place(home):
+    seed(home["env"])
+    assert read(home["cfg"]) == read(EXAMPLE)
+    assert not home["legacy"].exists()
+
+
+def test_config_file_is_protected_during_a_run(home):
+    zones = dump(home["env"])["zones"]
+    assert str(home["cfg"]) in zones, "it names programs the audited scripts run"
 
 
 def test_relative_home_is_not_seeded_into_the_project(home):
@@ -119,6 +177,17 @@ def test_broken_install_never_crashes(home, tmp_path):
     (lone / "seed_config.py").write_bytes(read(SEED))  # no si_config.py next to it
     r = subprocess.run([sys.executable, str(lone / "seed_config.py")], capture_output=True, text=True, env=home["env"])
     assert (r.returncode, r.stdout, r.stderr) == (0, "", "")
+
+
+def test_number_options_from_the_file(home):
+    home["cfg"].parent.mkdir(parents=True)
+    home["cfg"].write_text('{"lock_wait_minutes": "1.5", "max_signoff": "4"}', encoding="utf-8")
+    o = opts_of(home["env"])
+    assert (o["lock_wait_minutes"], o["max_signoff"]) == (1.5, 4)
+    home["cfg"].write_text('{"lock_wait_minutes": 0}', encoding="utf-8")
+    assert opts_of(home["env"])["lock_wait_minutes"] == 0, "0 = don't wait, not the 180 default"
+    home["cfg"].write_text('{"lock_wait_minutes": "soon"}', encoding="utf-8")
+    assert opts_of(home["env"])["lock_wait_minutes"] == 180
 
 
 def test_seeded_file_behaves_like_no_file(home):

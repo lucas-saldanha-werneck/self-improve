@@ -831,14 +831,17 @@ def lock_busy():
     """Why `start` would exit 3 right now, or ""."""
     if WAIT_LOCK and os.path.exists(WAIT_LOCK):
         return f"{WAIT_LOCK} exists"
-    rc, out, err = C.run_user_command("pre_run_command", "pre_run", {"SELF_IMPROVE_MODE": "check"})
+    # the same variables as a real run (no window yet), so a command that reads them doesn't crash here
+    rc, out, err = C.run_user_command("pre_run_command", "pre_run", {
+        "SELF_IMPROVE_MODE": "check", "SELF_IMPROVE_SINCE": "", "SELF_IMPROVE_UNTIL": "",
+        "SELF_IMPROVE_WIKI_DIR": WIKI, "SELF_IMPROVE_RAW_DIR": RAW})
     if rc == 3:
         return "pre_run_command answered 3 (busy)"
     return ""
 
 
 def cmd_wait_lock(a):
-    limit = time.time() + 60 * (a.max_minutes if a.max_minutes is not None else int(C.opt("lock_wait_minutes") or 180))
+    limit = time.time() + 60 * (a.max_minutes if a.max_minutes is not None else C.opt("lock_wait_minutes"))
     while True:
         why = lock_busy()
         if not why:
@@ -857,6 +860,7 @@ def cmd_start(a):
         print(f"{WAIT_LOCK} exists (another job is running): wait for it to finish and run `start` again",
               file=sys.stderr)
         sys.exit(3)
+    lk = None
     if os.path.exists(LOCK):
         try:
             lk = json.load(open(LOCK, encoding="utf-8"))
@@ -865,7 +869,6 @@ def cmd_start(a):
         if not a.force:
             sys.exit(f"run {lk.get('run_id')} is already active. Close it with `finish {lk.get('run_id')}` "
                      f"or `abort {lk.get('run_id')}` (the lock never expires by itself)")
-        do_abort(lk.get("run_id", "?"), "replaced by --force")
     until = now_utc()
     prev = last_finished(hist)
     if a.since:
@@ -880,7 +883,9 @@ def cmd_start(a):
     if pre["code"] == 3:
         print(f"pre_run_command says another job is busy ({pre['note'] or 'exit 3'}): run `wait-lock`, "
               "then `start` again", file=sys.stderr)
-        sys.exit(3)
+        sys.exit(3)  # before --force touches the active run: a busy answer leaves it as it was
+    if lk is not None:
+        do_abort(lk.get("run_id", "?"), "replaced by --force")
     base_id = until.astimezone().strftime("%Y%m%d-%H%M%S")
     os.makedirs(os.path.join(STATE, "runs"), exist_ok=True)
     for n in range(100):  # exclusive mkdir: two starts in the same second don't share a folder
@@ -1582,7 +1587,7 @@ def cmd_status(a):
 
 
 def main():
-    C.seed_config()  # first use: create SI_HOME/config.json if missing (never overwrites)
+    C.seed_config()  # first use: create the config file if missing (never overwrites)
     p = argparse.ArgumentParser(description="improve-system (self-improve plugin)")
     sp = p.add_subparsers(dest="cmd", required=True)
     s = sp.add_parser("start")
