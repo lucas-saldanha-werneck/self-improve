@@ -11,7 +11,8 @@ Where things live:
 
 Options come from CONFIG_FILE; an environment variable SELF_IMPROVE_<NAME> wins over the file.
 That file lives outside the plugin folder, so your settings survive plugin updates. seed_config() creates
-it from config.example.json on first run (every option at its default); an existing file is never touched.
+it from config.example.json on first run (every option null = the built-in default); an existing file is
+never touched.
 List options read from the environment are separated by os.pathsep (":" on macOS/Linux).
 Every option is optional. Without any config the tool works on CLAUDE.md files, skills and memory files.
 """
@@ -41,7 +42,7 @@ def _config_files():
 
 
 CONFIG_FILE, _SEED_TARGET = _config_files()
-# Starter copied to CONFIG_FILE on first run: every option at its default (same behavior as no file).
+# Starter copied to CONFIG_FILE on first run: every option null = the built-in default (same as no file).
 EXAMPLE_CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__))))), "config.example.json")
 
@@ -123,7 +124,9 @@ def opt(name):
             except ValueError:
                 return default
         return env.strip()
-    v = _FILE.get(name, default)
+    v = _FILE.get(name)
+    if v is None:  # absent or null: the built-in default (the seeded file holds null for every option)
+        return default
     if isinstance(default, list) and isinstance(v, str):
         v = [v] if v else []
     if isinstance(default, int) and not isinstance(v, (int, float)):  # "5" or "1.5" in the file

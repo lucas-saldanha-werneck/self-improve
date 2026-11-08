@@ -44,8 +44,24 @@ def test_example_lists_every_option_at_its_default():
     import si_config as C
     with open(EXAMPLE, encoding="utf-8") as f:
         example = json.load(f)
-    assert {k: v for k, v in example.items() if not k.startswith("_")} == C.DEFAULTS
+    assert {k: v for k, v in example.items() if not k.startswith("_")} == dict.fromkeys(C.DEFAULTS), \
+        "every option null: the seed pins no default"
     assert set(example["_doc"]) - {"about"} == set(C.DEFAULTS), "a short doc line per option"
+    for k, v in C.DEFAULTS.items():  # the note shows a number default
+        if isinstance(v, int) and not isinstance(v, bool):
+            assert f"Default: {v}" in example["_doc"][k], k
+
+
+def test_seeded_file_follows_a_changed_built_in_default(home):
+    """A later version that changes a default reaches users whose file was seeded."""
+    seed(home["env"])
+    assert read(home["cfg"]) == read(EXAMPLE)
+    code = (f"import json, sys; sys.path.insert(0, {SCRIPTS!r}); import si_config as C; "
+            "C.DEFAULTS.update(max_signoff=99, language='Klingon', skill_roots=['/x']); "
+            "print(json.dumps([C.opt('max_signoff'), C.opt('language'), C.opt('skill_roots')]))")
+    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, env=home["env"])
+    assert r.returncode == 0, r.stderr
+    assert json.loads(r.stdout) == [99, "Klingon", ["/x"]]
 
 
 def test_hook_is_registered_on_session_start():
