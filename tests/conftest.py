@@ -10,6 +10,17 @@ GUARD = os.path.join(SCRIPTS, "guard.py")
 HR = os.path.join(ROOT, "skills", "human-review", "scripts", "human_review.py")
 
 
+def minimal_env(home):
+    """The child's whole environment. Never a copy of the real shell: a failing test prints this dict,
+    and CI logs must not show real secrets. Tests add only the variables they need."""
+    e = {"PATH": os.environ.get("PATH", os.defpath), "HOME": str(home), "LANG": "C.UTF-8"}
+    if os.name == "nt":  # Windows needs these to start Python at all
+        for k in ("SYSTEMROOT", "TEMP", "TMP"):
+            if k in os.environ:
+                e[k] = os.environ[k]
+    return e
+
+
 @pytest.fixture
 def env(tmp_path):
     claude, state, out, wiki = tmp_path / "claude", tmp_path / "state", tmp_path / "out", tmp_path / "vault" / "wiki"
@@ -59,7 +70,9 @@ def env(tmp_path):
 
         ---
         """))
-    e = {k: v for k, v in os.environ.items() if not k.startswith(("SELF_IMPROVE_", "HUMAN_REVIEW_"))}
+    home = tmp_path / "home"
+    home.mkdir()
+    e = minimal_env(home)
     e.update(CLAUDE_CONFIG_DIR=str(claude), SELF_IMPROVE_HOME=str(state), SELF_IMPROVE_OUTPUT_DIR=str(out),
              SELF_IMPROVE_WIKI_DIR=str(wiki))
     return {"state": state, "out": out, "target": target, "env": e, "tmp": tmp_path, "claude": claude, "wiki": wiki}
