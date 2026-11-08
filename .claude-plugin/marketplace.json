@@ -1,0 +1,15 @@
+{
+  "name": "self-improve",
+  "description": "Find the corrections you keep repeating to Claude Code and turn them into reviewed changes to your skills, CLAUDE.md and memory.",
+  "owner": {
+    "name": "Lucas Saldanha Werneck",
+    "url": "https://github.com/lucas-saldanha-werneck"
+  },
+  "plugins": [
+    {
+      "name": "self-improve",
+      "source": "./",
+      "description": "A self-improvement loop for Claude Code: finds where you corrected Claude more than once, sorts each fix into apply-now / needs-your-OK / needs-an-answer, lets you decide with buttons, and applies only what you approved."
+    }
+  ]
+}

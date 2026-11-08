@@ -1,0 +1,14 @@
+{
+  "output_dir": "",
+  "wiki_dir": "",
+  "raw_dir": "",
+  "wiki_auto_dirs": [],
+  "skill_roots": [],
+  "project_roots": [],
+  "extra_protected": [],
+  "launch_command": "",
+  "notify_command": "",
+  "wait_for_lock": "",
+  "ignore_message_regex": "",
+  "max_signoff": 10
+}
