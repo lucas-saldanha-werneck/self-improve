@@ -122,7 +122,10 @@ Your reviews, change log, backups and run history stay in `~/.claude/self-improv
 
 ## Limits
 
-- Tested on macOS with Claude Code 2.1.319 and Python 3.9 and 3.15: install, the test suite, and the scripts on real session files. The three skills were not run end to end inside a live session for this release. Not tested on Linux or Windows. The guard uses `ps` to find the session that owns a run; where that fails, only the 2-hour rule applies.
+- Tested on macOS with Claude Code 2.1.319 and Python 3.9 and 3.15: install, the test suite, and the scripts on real session files. The three skills were not run end to end inside a live session for this release.
+- The test suite also passes on Linux and Windows in GitHub Actions (Python 3.12). The plugin was not run inside Claude Code on Linux or Windows.
+- The hook runs `python3`. On Windows, check that this command starts Python 3. Some installs only add `python` and `py`.
+- The guard uses `ps` to find the session that owns a run. Where that fails, and always on Windows, only the 2-hour rule applies.
 - The guard was tested by feeding it hook JSON on stdin (see `tests/test_guard.py`), not inside a live session.
 - The correction patterns are a hint for the subagents, not the decision. Only English and Portuguese are covered.
 - The first run with a lot of history can take a minute: it reads 30 days of sessions to count skill use.
