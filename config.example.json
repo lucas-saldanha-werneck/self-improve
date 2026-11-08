@@ -19,7 +19,8 @@
     "extra_lint_command": "Runs during the lint; each output line is one more finding. Empty = none",
     "language": "Language for item titles, questions and the chat summary, e.g. Portuguese. Empty = off",
     "analyst_notes": "Your own instructions for the analysts and the plan: text, or the path of a file. Empty = none",
-    "claude_command": "The claude program human-review asks for open sessions. Empty = claude on PATH"
+    "claude_command": "The claude program human-review asks for open sessions. Empty = claude on PATH",
+    "labels": "Your words for the fixed text render writes into review-*.md and needs-context-*.md, as {key: text}. Missing keys stay English, unknown keys are ignored with a warning. In review_intro and context_intro, {run}, {note} and {answer} are replaced. Keys and English defaults: review_title = 'improve-system review'; review_intro = 'Run `{run}`. Mark `[x]` to apply, `[-]` to reject for good. Leave `[ ]` to decide later (it comes back in the next run). To adjust an item, write a line `{note}: ...` right below it.'; review_footer = 'Nothing here is applied before the next run (or execute-reviewed).'; new = 'New'; still_pending = 'Still pending'; where = 'Where'; evidence = 'Evidence'; change = 'Change'; why = 'Why'; risk = 'Risk'; exact_change = 'Exact change'; replace = 'replace'; with = 'with'; pending_since = 'Pending since'; note = 'Note'; context_title = 'Context needed'; context_intro = 'Run `{run}`. Answer on the **{answer}:** line of each question. The next run reads the answers and picks the bucket.'; why_i_ask = 'Why I ask'; answer = 'Answer'. Empty = English"
   },
   "output_dir": null,
   "wiki_dir": null,
@@ -39,5 +40,6 @@
   "extra_lint_command": null,
   "language": null,
   "analyst_notes": null,
-  "claude_command": null
+  "claude_command": null,
+  "labels": null
 }

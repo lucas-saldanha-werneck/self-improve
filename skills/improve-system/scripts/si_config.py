@@ -68,7 +68,91 @@ DEFAULTS = {
     "language": "",            # language for item titles, questions and the chat summary (e.g. "Portuguese")
     "analyst_notes": "",       # your own instructions for the analysts and the plan: text, or the path of a file
     "claude_command": "",      # the `claude` program human-review asks for open sessions. Empty = claude on PATH
+    "labels": None,            # {label key: your text} for the fixed words `render` writes (see LABELS). None = English
 }
+
+# The fixed words `render` writes into review-*.md and needs-context-*.md, by key. Option `labels` replaces
+# any of them; a missing key stays English. In review_intro and context_intro, {run}, {note} and {answer}
+# are replaced by the run id and the note / answer labels. The parser reads "Note" and "Answer" back: it
+# accepts the English word, the old Portuguese one and your label, so files written before a change still work.
+LABELS = {
+    "review_title": "improve-system review",
+    "review_intro": ("Run `{run}`. Mark `[x]` to apply, `[-]` to reject for good. Leave `[ ]` to decide later "
+                     "(it comes back in the next run). To adjust an item, write a line `{note}: ...` right below it."),
+    "review_footer": "Nothing here is applied before the next run (or execute-reviewed).",
+    "new": "New",
+    "still_pending": "Still pending",
+    "where": "Where",
+    "evidence": "Evidence",
+    "change": "Change",
+    "why": "Why",
+    "risk": "Risk",
+    "exact_change": "Exact change",
+    "replace": "replace",
+    "with": "with",
+    "pending_since": "Pending since",
+    "note": "Note",
+    "context_title": "Context needed",
+    "context_intro": ("Run `{run}`. Answer on the **{answer}:** line of each question. "
+                      "The next run reads the answers and picks the bucket."),
+    "why_i_ask": "Why I ask",
+    "answer": "Answer",
+}
+# Item lines the parser must never take for a note: the note label may not be one of these.
+_ITEM_FIELD_LABELS = ("where", "evidence", "change", "why", "risk", "exact_change", "pending_since")
+# Words the parser always reads as "note" / "answer", whatever the labels (older files use them).
+BUILTIN_NOTE_WORDS = ("note", "nota")
+BUILTIN_ANSWER_WORDS = ("Answer", "Resposta")
+
+
+def labels():
+    """(labels, warnings): LABELS with the `labels` option applied. Never raises. An unknown key, a value that
+    is not non-empty one-line text, or a setting that is not a JSON object is ignored with a warning."""
+    out, warns = dict(LABELS), []
+    raw = opt("labels")
+    if raw is None or raw == "" or raw == {}:
+        return out, warns
+    if isinstance(raw, str):  # SELF_IMPROVE_LABELS='{"new": "Novos"}'
+        try:
+            raw = json.loads(raw)
+        except ValueError as e:
+            return out, [f"labels: not valid JSON ({e}); using the English labels"]
+    if not isinstance(raw, dict):
+        return out, [f"labels: must be an object {{key: text}}, got {type(raw).__name__}; using the English labels"]
+    for k, v in raw.items():
+        if str(k).startswith("_"):
+            continue
+        if k not in LABELS:
+            warns.append(f"labels: unknown key {k!r} ignored (known: {', '.join(LABELS)})")
+        elif not isinstance(v, str) or not v.strip() or "\n" in v or "\r" in v:
+            warns.append(f"labels: {k!r} must be one line of text; using {LABELS[k]!r}")
+        else:
+            out[k] = v.strip()
+    for k in ("note", "answer"):
+        if ":" in out[k]:
+            warns.append(f"labels: {k!r} can't contain ':' (the parser splits there); using {LABELS[k]!r}")
+            out[k] = LABELS[k]
+    # A note label equal to a field word (yours, or the English one older files still hold) would turn
+    # those lines into notes; so would a field label equal to a word the parser reads as "note".
+    note = out["note"].casefold()
+    clash = [k for k in _ITEM_FIELD_LABELS if note in (out[k].casefold(), LABELS[k].casefold())]
+    if clash:
+        warns.append(f"labels: 'note' is the same word as the {', '.join(clash)} field; those lines would be "
+                     f"read as notes. Using {LABELS['note']!r} for 'note'")
+        out["note"] = LABELS["note"]
+    note_words = {w.casefold() for w in BUILTIN_NOTE_WORDS + (out["note"],)}
+    for k in _ITEM_FIELD_LABELS:
+        if out[k].casefold() in note_words:
+            warns.append(f"labels: {k!r} = {out[k]!r} is a word the parser reads as a note; using {LABELS[k]!r}")
+            out[k] = LABELS[k]
+    return out, warns
+
+
+def fill_label(text, **values):
+    """{run}, {note}, {answer} in a label. Plain replace: other braces in your text stay as they are."""
+    for k, v in values.items():
+        text = text.replace("{" + k + "}", str(v))
+    return text
 
 
 def _load_file():
