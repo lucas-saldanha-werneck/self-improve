@@ -30,8 +30,8 @@ After you approve, `/self-improve:execute-reviewed` applies the item, keeps a ba
 ## Install
 
 ```
-/plugin marketplace add lucas-saldanha-werneck/self-improve
-/plugin install self-improve@self-improve
+/plugin marketplace add lucas-saldanha-werneck/claude-plugins
+/plugin install self-improve@lucas-plugins
 ```
 
 Needs `python3` (3.9 or newer, standard library only) on your PATH.
@@ -61,18 +61,18 @@ What the guard is and is not: it reads each tool call before it runs and stops t
 A run ends with `finish` or `abort`. The lock never expires by itself. Claude may only abort a run that is at least 2 hours old or whose session is gone. A younger run can only be aborted by you, in your own terminal:
 
 ```
-python3 ~/.claude/plugins/cache/self-improve/self-improve/0.2.0/skills/improve-system/scripts/improve_system.py abort <run_id>
+python3 ~/.claude/plugins/cache/lucas-plugins/self-improve/<version>/skills/improve-system/scripts/improve_system.py abort <run_id>
 ```
 
 (`status` prints the active run id.)
 
-## Configuration
+## Settings
 
-Everything works without configuration. To change something, edit `~/.config/self-improve/config.json` (see *Your settings* below). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
+Everything works without configuration. To change something, edit `~/.config/self-improve/config.json` (see *The settings file* below). An environment variable `SELF_IMPROVE_<NAME>` overrides the file; list values in the environment are separated by `:`.
 
 **Your settings survive plugin updates.** The config file lives in `~/.config/self-improve/`, and the run state and the reviews in `~/.claude/self-improve/`, both outside the plugin folder that an update replaces. Personal behavior goes in small scripts you point the `*_command` options at, not in the plugin's code.
 
-### Your settings
+### The settings file
 
 Your file is `~/.config/self-improve/config.json` (`$XDG_CONFIG_HOME/self-improve/config.json` when `XDG_CONFIG_HOME` is set; `$SELF_IMPROVE_HOME/config.json` if you set `SELF_IMPROVE_HOME`; on Windows `~` is `%USERPROFILE%`). Older versions kept it in `~/.claude/self-improve/config.json` (`$CLAUDE_CONFIG_DIR` replaces `~/.claude`): while the new file does not exist, that old file is still read and nothing new is created next to it; once the new file exists, it wins. Move the old file to the new place whenever you like. You don't have to create it: the plugin writes it the first time a session starts (or the first time `improve_system.py` runs), from [`config.example.json`](config.example.json), with every option set to `null` and a one-line note per option under `_doc`. `null` means "use the built-in default" (the table below), so that file behaves exactly like having no file, and a later version that changes a default reaches you too. Replace a `null` to change that setting. Plugin updates never touch it, and an existing file is never overwritten, so edit it freely.
 
@@ -168,8 +168,7 @@ None of these are needed. Each one adds something, and the plugin falls back whe
 ## Uninstall
 
 ```
-claude plugin uninstall self-improve@self-improve
-claude plugin marketplace remove self-improve
+claude plugin uninstall self-improve@lucas-plugins
 ```
 
 Your reviews, change log, backups and run history stay in `~/.claude/self-improve`, and your settings in `~/.config/self-improve`. Delete those folders if you don't want them. If you uninstall during a run, the lock file stays there too, but with the plugin gone there is no hook to enforce it.
@@ -190,6 +189,8 @@ Run the tests with `pytest tests`.
 
 The idea, the skill name and the three buckets (auto-approve, sign-off, needs context) come from Austin Marchese's video [How to Build A Self-Improving System with Claude](https://www.youtube.com/watch?v=2fc0NX9vIJ8). This plugin is my own build of that idea for Claude Code.
 
-MIT License. Copyright (c) 2026 Lucas Saldanha Werneck.
+## License
+
+MIT. See [LICENSE](LICENSE).
 
 Built with Claude Code
