@@ -1,7 +1,7 @@
 {
   "name": "self-improve",
-  "version": "0.4.0",
-  "description": "A self-improvement loop for Claude Code: finds where you corrected Claude more than once, sorts each fix into apply-now / needs-your-OK / needs-an-answer, lets you decide with buttons, and applies only what you approved.",
+  "version": "0.4.1",
+  "description": "Finds where you corrected Claude more than once and proposes the fix for your OK.",
   "author": {
     "name": "Lucas Saldanha Werneck",
     "url": "https://github.com/lucas-saldanha-werneck"
