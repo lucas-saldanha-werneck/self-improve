@@ -31,7 +31,7 @@ After you approve, `/self-improve:execute-reviewed` applies the item, keeps a ba
 
 ```
 /plugin marketplace add lucas-saldanha-werneck/claude-plugins
-/plugin install self-improve@lucas-plugins
+/plugin install self-improve@lucas-tools
 ```
 
 Needs `python3` (3.9 or newer, standard library only) on your PATH.
@@ -61,7 +61,7 @@ What the guard is and is not: it reads each tool call before it runs and stops t
 A run ends with `finish` or `abort`. The lock never expires by itself. Claude may only abort a run that is at least 2 hours old or whose session is gone. A younger run can only be aborted by you, in your own terminal:
 
 ```
-python3 ~/.claude/plugins/cache/lucas-plugins/self-improve/<version>/skills/improve-system/scripts/improve_system.py abort <run_id>
+python3 ~/.claude/plugins/cache/lucas-tools/self-improve/<version>/skills/improve-system/scripts/improve_system.py abort <run_id>
 ```
 
 (`status` prints the active run id.)
@@ -168,7 +168,7 @@ None of these are needed. Each one adds something, and the plugin falls back whe
 ## Uninstall
 
 ```
-claude plugin uninstall self-improve@lucas-plugins
+claude plugin uninstall self-improve@lucas-tools
 ```
 
 Your reviews, change log, backups and run history stay in `~/.claude/self-improve`, and your settings in `~/.config/self-improve`. Delete those folders if you don't want them. If you uninstall during a run, the lock file stays there too, but with the plugin gone there is no hook to enforce it.
