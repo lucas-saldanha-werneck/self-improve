@@ -30,7 +30,7 @@ After you approve, `/self-improve:execute-reviewed` applies the item, keeps a ba
 ## Install
 
 ```
-/plugin marketplace add lucas-saldanha-werneck/claude-plugins
+/plugin marketplace add lucas-saldanha-werneck/lucas-tools
 /plugin install self-improve@lucas-tools
 ```
 
