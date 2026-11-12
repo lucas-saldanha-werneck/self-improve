@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""PreToolUse hook (Edit|Write|MultiEdit|NotebookEdit|Bash): the self-improve lock.
+"""PreToolUse hook (Edit|Write|MultiEdit|NotebookEdit|Bash|Monitor|PowerShell): the self-improve lock.
 
 Rule: a NEEDS SIGN-OFF item never touches a skill, the wiki or config without your checkbox.
 While a run is active (SI_HOME/active-run.json), a write into a protected zone only passes if the
 EXACT path is in the run's allowed-paths.txt (AUTO items validated by `render` + items approved with [x]).
 
 Protected zones (see si_config.py): your skill folders, the optional wiki, CLAUDE_HOME/CLAUDE.md,
-settings(.local).json, hooks, output-styles, agents, commands, any project's .claude/ config, and the
-option extra_protected.
+settings(.local).json, hooks, output-styles, agents, commands, any project's .claude/ config, any
+CLAUDE.md / CLAUDE.local.md, the memory folders, the review files, and the option extra_protected.
 
 Fails closed:
 - applies to EVERY session and never expires; ends with `finish` or `abort`;
@@ -39,7 +39,11 @@ AUDITED = [SCRIPT, os.path.join(os.path.dirname(os.path.dirname(HERE)), "human-r
 ABORT_MIN_AGE_H = 2  # Claude may only abort a run idle for 2 h+; before that, only the user (in a terminal)
 # run control files: only the script writes them
 CONTROL = re.compile(r"(active-run\.json|allowed-paths\.txt|approved\.json|render\.json|applied\.jsonl|history\.jsonl|"
-                     r"review-hashes\.json)$")
+                     r"review-hashes\.json|auto-items\.json)$")
+# the review files hold your [x] and answers: during a run only the audited scripts write them
+REVIEW_FILE = re.compile(r"^(review|needs-context)-.*\.md$")
+HR_SCRIPT = AUDITED[1]
+CTX = {"session": None, "lock": {}}  # filled by main(): the hook's session and the run lock
 # text that gives away a zone even without a resolvable path (python -c "…/.claude/skills/…")
 MARKERS = C.path_markers()
 READONLY = {"ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "wc", "file", "stat", "jq", "diff", "cmp",
@@ -70,6 +74,8 @@ def in_zone(p):
     r = rp(p)
     if CONTROL.search(r) and C.path_key(r).startswith(C.path_key(STATE) + "/"):
         return True
+    if REVIEW_FILE.match(os.path.basename(r)) and C.path_key(os.path.dirname(r)) == C.path_key(C.OUT):
+        return True
     return C.is_protected(r)
 
 
@@ -96,6 +102,25 @@ def resolve(t, cwd):
     return t if t.startswith(("/", "~")) or os.path.isabs(t) else os.path.join(cwd, t)
 
 
+def is_interp(prog):
+    return prog in INTERP or bool(re.match(r"^python[\d.]*$", prog))
+
+
+def script_of(prog, args):
+    """(script, its args) when an interpreter runs a script file, skipping the interpreter's own options
+    (python3 -u x.py, python3 -W ignore x.py); (None, []) for inline code, a module or no script."""
+    if not is_interp(prog):
+        return None, []
+    i = 0
+    while i < len(args) and args[i].startswith("-") and args[i] != "-":
+        a = args[i]
+        # -c CODE / -m MODULE, also glued to python's flag letters (-uc, -Bm)
+        if a in ("-c", "-m", "-e", "-E") or (prog.startswith("python") and re.match(r"^-[bBdEhiIOPqsSuvVx]*[cm]", a)):
+            return None, []
+        i += 2 if args[i] in ("-W", "-X", "--check-hash-based-pycs") else 1
+    return (args[i], args[i + 1:]) if i < len(args) else (None, [])
+
+
 def runs_start(cmd):
     """True only if some segment RUNS improve_system.py start (text quoted in a prompt does not count)."""
     for seg in re.split(r"&&|\|\||[;|\n]", strip_heredocs(cmd)):
@@ -105,27 +130,41 @@ def runs_start(cmd):
             continue
         while toks and (re.match(r"^[A-Za-z_]\w*=", toks[0]) or toks[0] in PREFIX):
             toks = toks[1:]
-        if toks and os.path.basename(toks[0]) in INTERP:
-            toks = toks[1:]
+        if toks and is_interp(os.path.basename(toks[0])):
+            s, rest = script_of(os.path.basename(toks[0]), toks[1:])
+            toks = [s] + rest if s else []
         if len(toks) >= 2 and toks[0].endswith("improve_system.py") and toks[1] == "start":
             return True
     return False
 
 
-def strip_heredocs(cmd):
-    """Drop heredoc bodies (<<EOF … EOF): they are data for the program, not commands or paths."""
-    out, lines, i = [], cmd.split("\n"), 0
+# <<WORD starts a heredoc; <<< is a here-string and $((1<<4)) / ((x<<2)) are arithmetic shifts
+HEREDOC_RE = re.compile(r"(?<!<)<<(?!<)-?\s*(['\"]?)(\w+)\1")
+ARITH_RE = re.compile(r"\$?\(\((?:[^()]|\([^()]*\))*\)\)")
+
+
+def heredocs(cmd):
+    """(command without heredoc bodies, [(line that opens the heredoc, body)])."""
+    out, bodies, lines, i = [], [], cmd.split("\n"), 0
     while i < len(lines):
         line = lines[i]
-        m = re.search(r"<<-?\s*(['\"]?)(\w+)\1", line)
-        out.append(re.sub(r"<<-?\s*(['\"]?)\w+\1", " ", line) if m else line)
+        masked = ARITH_RE.sub(lambda m: " " * len(m.group(0)), line)
+        m = HEREDOC_RE.search(masked)
+        out.append(line[:m.start()] + " " + line[m.end():] if m else line)
         i += 1
         if m:
-            end = m.group(2)
+            end, body = m.group(2), []
             while i < len(lines) and lines[i].strip() != end:
+                body.append(lines[i])
                 i += 1
             i += 1
-    return "\n".join(out)
+            bodies.append((line, "\n".join(body)))
+    return "\n".join(out), bodies
+
+
+def strip_heredocs(cmd):
+    """Drop heredoc bodies (<<EOF … EOF): they are data for the program, not commands or paths."""
+    return heredocs(cmd)[0]
 
 
 def split_segments(cmd):
@@ -202,19 +241,34 @@ def pid_alive(pid):
         return True  # no permission = it exists
 
 
+def last_activity(lk):
+    """Epoch of the run's last sign of life: its start, or the newest change in its run folder."""
+    t = lk.get("started_epoch", 0)
+    rd = lk.get("run_dir")
+    if rd and os.path.isdir(rd):
+        t = max(t, os.path.getmtime(rd))
+        for n in os.listdir(rd):
+            try:
+                t = max(t, os.path.getmtime(os.path.join(rd, n)))
+            except OSError:
+                pass
+    return t
+
+
 def abort_check(args):
-    """abort/--force coming from Claude only works on a run idle for ABORT_MIN_AGE_H h (otherwise only the user)."""
+    """abort/--force coming from Claude only works on a run idle for ABORT_MIN_AGE_H h (otherwise only the user).
+    Idle = no change in the run folder for that long, not just started that long ago."""
     try:
         with open(LOCK, encoding="utf-8") as f:
             lk = json.load(f)
-        age_h = (time.time() - lk.get("started_epoch", 0)) / 3600
+        age_h = (time.time() - last_activity(lk)) / 3600
     except Exception:
         return "unreadable lock: only the user can unlock it (in a terminal: `python3 … abort RUN_ID --corrupt-lock`)"
     owner = lk.get("owner_pid")
     if owner and not pid_alive(owner):
         return None  # the session that owned the run is gone: unlocking is fine
     if age_h < ABORT_MIN_AGE_H:
-        return (f"run active for {age_h:.1f} h: aborting now would switch off the lock to write without [x]. "
+        return (f"run active {age_h:.1f} h ago: aborting now would switch off the lock to write without [x]. "
                 f"Only the user aborts a run younger than {ABORT_MIN_AGE_H} h (in a terminal: `python3 … abort {lk.get('run_id')}`)")
     if "--corrupt-lock" in args:
         return "--corrupt-lock is for the user only"
@@ -333,6 +387,50 @@ def seg_writes(prog, args):
     return None
 
 
+def feeds_interp(line):
+    """True when some program on this line is an interpreter (python3 <<EOF, cat <<EOF | node)."""
+    for seg in split_segments(line):
+        seg = re.sub(r"(?<!<)<<(?!<)-?\s*(['\"]?)\w+\1", " ", seg)
+        try:
+            toks = shlex.split(seg)
+        except ValueError:
+            toks = seg.split()
+        while toks and (re.match(r"^[A-Za-z_]\w*=", toks[0]) or toks[0] in PREFIX):
+            toks = toks[1:]
+        if toks and INLINE_INTERP.match(os.path.basename(toks[0])):
+            return True
+    return False
+
+
+PATH_TOKEN = re.compile(r"(?:[A-Za-z]:)?[~/][^\s'\"`(),;|&<>]*")
+
+
+def text_names_zone(text, cwd, allow):
+    """True when free text (code, a PowerShell line) names a protected zone that is not a released path."""
+    left = text
+    for t in PATH_TOKEN.findall(text):
+        p = resolve(t, cwd)
+        if t and in_zone(p):
+            if not allowed(p, allow):
+                return True
+            left = left.replace(t, "")
+    return bool(MARKERS.search(left))
+
+
+def check_powershell(cmd, cwd, allow):
+    """PowerShell is not parsed: during a run, a command that names a protected zone is blocked
+    (read it with Read/Grep instead)."""
+    text = cmd.replace("\\", "/")
+    for q in re.findall(r"'([^']*)'|\"([^\"]*)\"", text):  # quoted relative paths too
+        for v in q:
+            if v and not v.startswith(("/", "~")) and re.search(r"\.\w{1,5}$", v) and in_zone(resolve(v, cwd)) \
+                    and not allowed(resolve(v, cwd), allow):
+                return f"PowerShell command names {resolve(v, cwd)}"
+    if text_names_zone(text, cwd, allow):
+        return "PowerShell command names a protected zone (not parsed: use Read/Grep, or wait until the run ends)"
+    return None
+
+
 def check_bash(cmd, cwd, allow):
     """Devolve motivo de bloqueio, ou None."""
     # no shortcut: every command is read during a run (variables and symlinks do not escape)
@@ -348,10 +446,16 @@ def check_bash(cmd, cwd, allow):
                 break
             t = t2
         return t
-    cmd = strip_heredocs(cmd)
+    cmd, bodies = heredocs(cmd)
     if C.WINDOWS:
         # a backslash is a path separator on Windows: C:\\x\\SKILL.md must be read as a path, not as escapes
         cmd = cmd.replace("\\", "/")
+        bodies = [(l.replace("\\", "/"), b.replace("\\", "/")) for l, b in bodies]
+    # a heredoc fed to an interpreter is code: with allow_inline_code=1 it still may not name a zone
+    for line, body in bodies:
+        if feeds_interp(line) and text_names_zone(body, cwd, allow):
+            return "heredoc code for an interpreter names a protected zone"
+
     def names_zone(text, words):
         """True when this segment names a protected zone that is not an exact released path."""
         left = text
@@ -412,17 +516,23 @@ def check_bash(cmd, cwd, allow):
             continue
         # run of an audited self-improve script (reviewed code), including improve_system.py itself.
         # Checked wherever the plugin is installed: abort/--force from Claude only after ABORT_MIN_AGE_H.
-        script = None
-        if prog in INTERP and args and not args[0].startswith("-"):
-            script = resolve(args[0], cwd)
+        script, s_args = None, args
+        if is_interp(prog):
+            s, s_args = script_of(prog, args)
+            script = resolve(s, cwd) if s else None
         elif "/" in toks[0] and os.path.isfile(resolve(toks[0], cwd)):
             script = resolve(toks[0], cwd)
         if script and os.path.isfile(script) and C.path_key(script) in {C.path_key(x) for x in AUDITED}:
-            sub_cmd = (args[1] if len(args) > 1 else "") if prog in INTERP else (args[0] if args else "")
-            if C.path_key(script) == C.path_key(SCRIPT) and (sub_cmd == "abort" or (sub_cmd == "start" and "--force" in args)):
-                r = abort_check(args)
+            sub_cmd = s_args[0] if s_args else ""
+            if C.path_key(script) == C.path_key(SCRIPT) and (sub_cmd == "abort" or (sub_cmd == "start" and "--force" in s_args)):
+                r = abort_check(s_args)
                 if r:
                     return r
+            if C.path_key(script) == C.path_key(HR_SCRIPT) and sub_cmd == "mark":
+                owner = CTX["lock"].get("session_id")
+                if not owner or owner == CTX["session"]:
+                    return ("`human_review.py mark` from the session running the improve-system run: only you "
+                            "decide the review items (a REVIEW session, or edit the file yourself)")
             continue
         # code typed into the command (python -c, node -e, a heredoc or pipe into python3) can build any
         # path at run time (Path.home()/".claude"), so its writes can't be checked from the text: blocked
@@ -456,6 +566,12 @@ def check_bash(cmd, cwd, allow):
         leftover = body
         if prog in DEST_ONLY:  # only the destination is written
             dests, srcs = dest_args(prog, args)
+            if prog == "ln" or (prog == "cp" and any(re.match(r"^-[A-Za-z]*[sl]", a) or a in ("--link", "--symbolic-link")
+                                                     for a in args)):
+                # a link to a zone file is a door into it: `ln -s ZONE /tmp/l; echo x >> /tmp/l`
+                for a in srcs:
+                    if in_zone(resolve(a, cwd)) and not allowed(resolve(a, cwd), allow):
+                        return f"`{prog}` links to {resolve(a, cwd)}"
             for a in srcs:
                 leftover = leftover.replace(a, "")
             zone_args = [a for a in dests if in_zone(resolve(a, cwd))]
@@ -498,6 +614,7 @@ def main():
             lock = json.load(f)
         allow = C.read_allowed(os.path.join(lock["run_dir"], "allowed-paths.txt"))
         run_id = lock["run_id"]
+        CTX["lock"], CTX["session"] = lock, d.get("session_id")
     except Exception as e:
         lock, allow, run_id = None, set(), "?"
         broken = f"lock {LOCK} unreadable ({e})"
@@ -511,8 +628,10 @@ def main():
         p = ti.get("file_path") or ti.get("notebook_path") or ""
         if p and in_zone(p) and not allowed(p, allow):
             reason = f"{p} is a protected zone and is not released"
-    elif tool == "Bash":
-        reason = check_bash(ti.get("command", ""), d.get("cwd") or os.getcwd(), allow)
+    elif tool in ("Bash", "Monitor"):  # Monitor runs a shell command too
+        reason = check_bash(ti.get("command") or "", d.get("cwd") or os.getcwd(), allow)
+    elif tool == "PowerShell":
+        reason = check_powershell(ti.get("command") or "", d.get("cwd") or os.getcwd(), allow)
     if reason:
         deny(f"improve-system run {run_id} active: {broken + '; ' if broken else ''}{reason}. {howto}")
 

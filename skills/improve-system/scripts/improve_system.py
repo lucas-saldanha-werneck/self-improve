@@ -29,7 +29,7 @@ State lives outside the plugin (see si_config.py): SI_HOME/history.jsonl, SI_HOM
 SI_HOME/active-run.json (the lock guard.py reads). Your files: OUT/review-*, needs-context-*, change-log.md.
 Only a run closed with `finish` moves the window. An aborted run leaves the next window unchanged.
 """
-import argparse, glob, json, os, re, subprocess, sys, time, unicodedata
+import argparse, glob, json, os, re, shutil, subprocess, sys, time, unicodedata
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -132,7 +132,15 @@ def norm(s):
 def read_history():
     if not os.path.exists(HISTORY):
         return []
-    return [json.loads(l) for l in open(HISTORY, encoding="utf-8") if l.strip()]
+    out = []
+    for l in open(HISTORY, encoding="utf-8"):
+        try:  # a line cut by a crash mid-write is skipped, not fatal for every command
+            ev = json.loads(l)
+        except ValueError:
+            continue
+        if isinstance(ev, dict) and "event" in ev and "run_id" in ev:
+            out.append(ev)
+    return out
 
 
 def append_history(ev):
@@ -769,6 +777,65 @@ def item_digest(it):
     return hashlib.sha256(json.dumps(keep, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
 
+def question_digest(it):
+    import hashlib
+    keep = {k: it.get(k) for k in ("title", "question", "options")}
+    return hashlib.sha256(json.dumps(keep, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def flat(x):
+    """One line with no HTML comment marks: text from the plan can't forge a checkbox or an item id."""
+    return " ".join(str(x).split()).replace("<!--", "<! --").replace("-->", "-- >")
+
+
+def flat_json(s):
+    """JSON string on one line; comment marks escaped as JSON (\\u003c / \\u003e), so the text stays exact."""
+    return json.dumps(s, ensure_ascii=False).replace("<!--", "\\u003c!--").replace("-->", "--\\u003e")
+
+
+def read_marks(path):
+    """{run/id: (mark, [notes])} of a review file render wrote earlier in this run."""
+    out = {}
+    if not path or not os.path.exists(path):
+        return out
+    note_line_re = regexes_for(path)[0]
+    lines = open(path, errors="ignore", encoding="utf-8").read().splitlines()
+    for i, line in enumerate(lines):
+        m = ITEM_RE.match(line)
+        if not m:
+            continue
+        notes = []
+        for nxt in lines[i + 1:]:
+            if not nxt.startswith(" ") and nxt.strip():
+                break
+            nm = note_line_re.match(nxt)
+            if nm:
+                notes.append(nxt[nm.end():].strip())
+        out[f"{m.group(2)}/{m.group(3)}"] = ((m.group(1) or " ").lower(), notes)
+    return out
+
+
+def read_answers(path):
+    """{run/id: answer} of a needs-context file render wrote earlier in this run."""
+    out, cur = {}, None
+    if not path or not os.path.exists(path):
+        return out
+    ans_re = regexes_for(path)[1]
+    for line in open(path, errors="ignore", encoding="utf-8").read().splitlines():
+        h = ANS_HEAD_RE.match(line)
+        if h:
+            cur = f"{h.group(1)}/{h.group(2)}"
+            continue
+        if cur is None:
+            continue
+        m = ans_re.match(line)
+        if m:
+            out[cur] = m.group(1).strip()
+        elif out.get(cur) and line.strip() and not line.startswith(("#", "---", ">")):
+            out[cur] += " " + line.strip()
+    return {k: v for k, v in out.items() if v}
+
+
 def rendered_digests():
     """{review file: {run/id: digest}} from every render.json (older runs have no digests)."""
     out = {}
@@ -807,6 +874,8 @@ def targets_to_allow(items):
             t = t[4:] if t.startswith("new:") else t
             if not t:
                 continue
+            if "\n" in t or "\r" in t:
+                continue  # one path per line in allowed-paths.txt: a line break would release another file
             t = os.path.expanduser(t)
             allow.add(rp(t))  # the exact file only: a new skill lists each file in extra_targets
             if WIKI and in_zone(t, [WIKI]):  # every wiki change leaves a trace in INDEX and log
@@ -817,7 +886,7 @@ def targets_to_allow(items):
 def write_allow(rd, extra):
     p = os.path.join(rd, "allowed-paths.txt")
     cur = set(open(p, encoding="utf-8").read().split("\n")) if os.path.exists(p) else set()
-    cur = {c for c in cur if c} | extra
+    cur = {c for c in cur if c} | {x for x in extra if "\n" not in x and "\r" not in x}
     open(p, "w", encoding="utf-8").write("\n".join(sorted(cur)) + "\n")
     return sorted(cur)
 
@@ -1158,7 +1227,9 @@ def cmd_render(a):
         targets = [x for x in [it.get("target", "")] + list(it.get("extra_targets") or []) if x]
         for t in targets:
             t0 = os.path.expanduser(t[4:] if t.startswith("new:") else t)
-            if not os.path.isabs(t0):
+            if "\n" in t or "\r" in t:
+                errs.append(f"{it['title']}: target {t!r} has a line break")
+            elif not os.path.isabs(t0):
                 errs.append(f"{it['title']}: target '{t}' must be an absolute path")
             elif RAW and in_zone(t0, [RAW]) and not (b == "auto" and it.get("kind") == "conflicted-copy"):
                 errs.append(f"{it['title']}: {t} is in raw_dir (immutable). Only a conflict copy may be moved")
@@ -1169,7 +1240,8 @@ def cmd_render(a):
             for t in targets:
                 t0 = os.path.expanduser(t[4:] if t.startswith("new:") else t)
                 junk = (kind == "backup-cleanup" and ".bak-" in os.path.basename(t0)) or \
-                       (kind == "conflicted-copy" and "conflicted copy" in os.path.basename(t0))
+                       (kind == "conflicted-copy" and "conflicted copy" in os.path.basename(t0)) or \
+                       (kind == "memory-index" and auto_target_ok(kind, t0))  # memory is protected; its index is AUTO
                 if C.is_protected(t0, include_wiki=False) and not junk:
                     errs.append(f"{it['title']}: {t} is a skill/config file, never AUTO. Move it to signoff")
                 elif not auto_target_ok(kind, t0):
@@ -1205,8 +1277,12 @@ def cmd_render(a):
     open_q = jload(os.path.join(rd, "open-questions.json"), [])
     day = f"{a.run_id[:4]}-{a.run_id[4:6]}-{a.run_id[6:8]}"
     prev_render = jload(os.path.join(rd, "render.json"), {})
+    prev_marks, prev_answers = {}, {}
     if prev_render.get("suffix"):
         suffix = prev_render["suffix"]  # render again in the same run = same files, replaced
+        # decisions already written in the old files move to the new ones (only for unchanged content)
+        prev_marks = read_marks(prev_render.get("review"))
+        prev_answers = read_answers(prev_render.get("needs_context"))
         for k in ("review", "needs_context"):
             if prev_render.get(k) and os.path.exists(prev_render[k]):
                 os.remove(prev_render[k])
@@ -1222,22 +1298,31 @@ def cmd_render(a):
     for w in LABEL_WARNINGS:
         print(f"warning: {w}", file=sys.stderr)
 
+    prev_digests = prev_render.get("digests") if isinstance(prev_render.get("digests"), dict) else {}
+    prev_q = prev_render.get("q_digests") if isinstance(prev_render.get("q_digests"), dict) else None
+
     def item_md(it, rid):
-        lines = [f"- [ ] **{it['id']} · {it.get('title', '')}** <!-- {rid}/{it['id']} -->"]
+        key = f"{rid}/{it['id']}"
+        mark, kept_notes = " ", []
+        if key in prev_marks and prev_digests.get(key) == item_digest(it):
+            mark, kept_notes = prev_marks[key]
+        lines = [f"- [{mark}] **{it['id']} · {flat(it.get('title', ''))}** <!-- {key} -->"]
         if it.get("target"):
-            lines.append(f"    - {L['where']}: `{short(it['target'])}` ({it.get('kind')})")
-        for key in ("evidence", "change", "why", "risk"):
-            if it.get(key):
-                lines.append(f"    - {L[key]}: {it[key]}")
+            lines.append(f"    - {L['where']}: `{flat(short(it['target']))}` ({flat(it.get('kind'))})")
+        for k in ("evidence", "change", "why", "risk"):
+            if it.get(k):
+                lines.append(f"    - {L[k]}: {flat(it[k])}")
         pt = it.get("patch")
         if isinstance(pt, dict) and isinstance(pt.get("old"), str) and isinstance(pt.get("new"), str):
             # one line (JSON strings): exactly what apply-patch will swap
-            lines.append(f"    - {L['exact_change']}: {L['replace']} {json.dumps(pt['old'], ensure_ascii=False)} "
-                         f"{L['with']} {json.dumps(pt['new'], ensure_ascii=False)}")
+            lines.append(f"    - {L['exact_change']}: {L['replace']} {flat_json(pt['old'])} "
+                         f"{L['with']} {flat_json(pt['new'])}")
         if it.get("carried_since"):
-            lines.append(f"    - {L['pending_since']} {it['carried_since']}")
-        for n in it.get("notes") or []:  # your adjustments travel with a pending item
-            lines.append(f"    - {L['note']}: {' '.join(str(n).split())}")
+            lines.append(f"    - {L['pending_since']} {flat(it['carried_since'])}")
+        notes = list(it.get("notes") or [])
+        notes += [n for n in kept_notes if n not in notes]
+        for n in notes:  # your adjustments travel with a pending item
+            lines.append(f"    - {L['note']}: {flat(n)}")
         return "\n".join(lines)
 
     if signoff or carried:
@@ -1260,25 +1345,32 @@ def cmd_render(a):
         body = [f"# {L['context_title']}, {day}", "",
                 C.fill_label(L["context_intro"], run=a.run_id, note=L["note"], answer=L["answer"]), ""]
         for it, rid in [(i, a.run_id) for i in ctx] + [(q, q["run_id"]) for q in open_q]:
-            body += [f"### {it['id']} · {it.get('title', '')} <!-- {rid}/{it['id']} -->", "",
-                     f"{it.get('question', '')}", ""]
+            key = f"{rid}/{it['id']}"
+            body += [f"### {it['id']} · {flat(it.get('title', ''))} <!-- {key} -->", "",
+                     f"{flat(it.get('question', ''))}", ""]
             if it.get("options"):
-                body += [f"- {o}" for o in it["options"]] + [""]
+                body += [f"- {flat(o)}" for o in it["options"]] + [""]
             if it.get("evidence"):
-                body += [f"{L['why_i_ask']}: {it['evidence']}", ""]
-            body += [f"**{L['answer']}:** ", "", "---", ""]
+                body += [f"{L['why_i_ask']}: {flat(it['evidence'])}", ""]
+            ans = prev_answers.get(key, "") if prev_q is None or prev_q.get(key) == question_digest(it) else ""
+            body += [f"**{L['answer']}:** {flat(ans)}" if ans else f"**{L['answer']}:** ", "", "---", ""]
         open(p, "w", encoding="utf-8").write("\n".join(body))
         out["needs_context"] = p
     allow = write_allow(rd, targets_to_allow(auto))
     digests = {f"{a.run_id}/{i['id']}": item_digest(i) for i in signoff}
     digests.update({f"{c['run_id']}/{c['id']}": item_digest(c) for c in carried})
+    q_digests = {f"{a.run_id}/{i['id']}": question_digest(i) for i in ctx}
+    q_digests.update({f"{q['run_id']}/{q['id']}": question_digest(q) for q in open_q})
     res = {**out, "suffix": suffix, "auto": len(auto), "signoff": len(signoff), "context": len(ctx),
-           "carried": len(carried), "open_questions": len(open_q), "allowed": allow, "digests": digests}
+           "carried": len(carried), "open_questions": len(open_q), "allowed": allow, "digests": digests,
+           "q_digests": q_digests}
     res["labels"] = {"note": L["note"], "answer": L["answer"]}  # the parser reads these back from this file
     if LABEL_WARNINGS:
         res["label_warnings"] = LABEL_WARNINGS
     jdump(res, os.path.join(rd, "render.json"))
     print(json.dumps(res, ensure_ascii=False, indent=1))
+    # the AUTO items as validated here: log / apply-patch use this copy, not a plan.json edited later
+    jdump(auto, os.path.join(rd, "auto-items.json"))
 
 
 def item_for(run_id, ident):
@@ -1293,13 +1385,21 @@ def item_for(run_id, ident):
     if it is None:
         sys.exit(f"item {key} is not in the plan.json of run {rid}")
     approved = {f"{x['run_id']}/{x['id']}": x for x in jload(os.path.join(rd, "approved.json"), [])}
-    if it.get("bucket") == "auto" and rid != run_id:
-        sys.exit(f"{key} is AUTO from another run. AUTO is only applied in the run that proposed it")
-    if it.get("bucket") != "auto":
-        if key not in approved:
-            sys.exit(f"{key} is not approved with [x] in this run (approved.json), it can't be logged as applied")
-        # the snapshot taken at `start` wins: a plan.json edited after approval changes nothing
+    if key in approved:
+        # the snapshot taken at `start` wins: a plan.json edited after approval (even its bucket) changes nothing
         it = approved[key]
+    elif it.get("bucket") == "auto":
+        if rid != run_id:
+            sys.exit(f"{key} is AUTO from another run. AUTO is only applied in the run that proposed it")
+        frozen = os.path.join(rd, "auto-items.json")
+        if not os.path.exists(frozen):
+            sys.exit(f"{key} is AUTO but this run has no render yet. Run `render` first")
+        # the copy `render` validated wins over a plan.json edited after render
+        it = next(({**x, "run_id": rid} for x in jload(frozen, []) if x.get("id") == iid), None)
+        if it is None:
+            sys.exit(f"{key} was not AUTO when `render` ran. Run `render` again")
+    else:
+        sys.exit(f"{key} is not approved with [x] in this run (approved.json), it can't be logged as applied")
     tgts = [x[4:] if x.startswith("new:") else x for x in [it.get("target", "")] + list(it.get("extra_targets") or []) if x]
     ok_paths = {rp(x) for x in tgts}
     if WIKI and any(in_zone(x, [WIKI]) for x in tgts):
@@ -1376,6 +1476,14 @@ def cmd_apply_patch(a):
     patch = it.get("patch")
     if not isinstance(patch, dict) or not isinstance(patch.get("old"), str) or not isinstance(patch.get("new"), str):
         sys.exit(f"{key} has no 'patch' {{old, new}}. Apply it the normal way (edit + log)")
+    if key in resolved_ids(read_history()):
+        sys.exit(f"{key} was already applied or rejected. Nothing was touched")
+    if [n for n in it.get("notes") or [] if str(n).strip()]:
+        # the exact patch can't carry the user's adjustment: it becomes a new SIGN-OFF item with the note
+        print(f"{key} has a note from the user ({'; '.join(it['notes'])}). apply-patch would drop it: "
+              f"add a new SIGN-OFF item whose patch follows the note, and close this one with "
+              f"`log --superseded-by`. Nothing was touched", file=sys.stderr)
+        sys.exit(5)
     target = os.path.expanduser(it.get("target", ""))
     allow = C.read_allowed(os.path.join(run_dir(a.run_id), "allowed-paths.txt"))
     if C.path_key(target) not in allow or rp(target) not in ok_paths:
@@ -1397,10 +1505,12 @@ def cmd_apply_patch(a):
         sys.exit(f"{key}: the patched {short(target)} would be invalid ({bad}). Nothing was touched")
     record_intent(a.run_id, key, target)
     bak = do_backup(a.run_id, target)
-    tmp = f"{target}.tmp-{os.getpid()}"
+    real = os.path.realpath(target)  # a symlink stays a link: the file it points to is the one replaced
+    tmp = f"{real}.tmp-{os.getpid()}"
     with open(tmp, "w", encoding="utf-8", newline="") as fo:
         fo.write(new_text)
-    os.replace(tmp, target)
+    shutil.copymode(real, tmp)  # keep the mode (executable hook, 0600 file)
+    os.replace(tmp, real)
     if open(target, encoding="utf-8", newline="").read() != new_text:
         sys.exit(f"{short(target)} does not match the patch. Restore it from {bak}")
     cmd_log(argparse.Namespace(run_id=a.run_id, id=key, target=target, backup=bak, removed=False,
@@ -1434,7 +1544,14 @@ def cmd_log(a):
         txt = txt.rstrip("\n") + f"\n\n{head}\n\n"
     line = (f"- {datetime.now().strftime('%H:%M')} · {label} · {key} · `{short(a.target)}`: {a.summary}"
             + (f" (backup `{short(a.backup)}`)" if a.backup else "") + "\n")
-    open(CHANGELOG, "w", encoding="utf-8").write(txt + line)
+    tmp = f"{CHANGELOG}.tmp-{os.getpid()}"  # whole file or nothing: a crash mid-write keeps the old log
+    try:
+        with open(tmp, "w", encoding="utf-8") as fo:
+            fo.write(txt + line)
+        os.replace(tmp, CHANGELOG)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
     with open(os.path.join(rd, "applied.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps({"id": key, "bucket": it.get("bucket"), "target": a.target, "summary": a.summary,
                             "backup": a.backup, "sha256_after": digest, "ts": iso(now_utc()),

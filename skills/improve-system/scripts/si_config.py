@@ -243,8 +243,10 @@ TRASH = os.path.join(SI_HOME, "trash")
 OLD_BACKUPS = os.path.join(SI_HOME, "backups", "old")
 
 # A project's own .claude folder holds config too (skills, hooks, settings). Protected anywhere.
+# A project's own CLAUDE.md (and CLAUDE.local.md) is instructions to Claude, like the global one.
 PROJECT_CONFIG_RE = re.compile(r"/\.claude/(skills|hooks|agents|commands|output-styles)(/|$)|"
-                               r"/\.claude/(settings(\.local)?\.json|CLAUDE\.md)$", re.I if os.name == "nt" else 0)
+                               r"/\.claude/(settings(\.local)?\.json|CLAUDE\.md)$|"
+                               r"/CLAUDE(\.local)?\.md$", re.I if os.name == "nt" else 0)
 
 
 WINDOWS = os.name == "nt"
@@ -348,14 +350,22 @@ def is_protected(path, include_wiki=True):
     """Skill, config or wiki: only an exact path from allowed-paths.txt may be written during a run."""
     if in_zone(path, protected_zones(include_wiki)):
         return True
+    if is_memory(path):
+        return True
     return bool(PROJECT_CONFIG_RE.search(rp(path)))
+
+
+def is_memory(path):
+    """A file in a project's memory folder (<claude home>/projects/<project>/memory/...)."""
+    return bool(re.match(re.escape(path_key(SESSIONS).rstrip("/")) + r"/[^/]+/memory(/|$)", path_key(path)))
 
 
 def path_markers():
     """Text fragments that reveal a protected path inside a command, even when the path can't be resolved."""
     frags = [r"\.claude/skills", r"\.claude/CLAUDE\.md", r"\.claude/settings(\.local)?\.json(?![\w.-])",
              r"\.claude/hooks", r"\.claude/output-styles", r"\.claude/agents", r"\.claude/commands",
-             r"self-improve/(active-run|runs/)", r"allowed-paths\.txt"]
+             r"self-improve/(active-run|runs/)", r"allowed-paths\.txt",
+             re.escape(([p for p in rp(CLAUDE_HOME).split("/") if p] or ["."])[-1]) + r"/projects/[^/\s'\"]+/memory"]
     for z in protected_zones():
         parts = [p for p in rp(z).split("/") if p][-2:]
         if len(parts) == 2:
