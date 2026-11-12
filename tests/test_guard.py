@@ -100,3 +100,55 @@ def test_start_records_session(env):
     hook(env, "Bash", {"command": f"python3 {IS} start"})
     s = json.loads((env["state"] / "starting-session.json").read_text(encoding="utf-8"))
     assert s["session_id"] == "test"
+
+
+def test_uniq_output_operand_is_a_write(env):
+    p = skill_file(env)
+    md = str(env["claude"] / "CLAUDE.md")
+    lock(env)
+    assert hook(env, "Bash", {"command": f"uniq /dev/null {md}"})  # uniq IN OUT empties OUT
+    assert hook(env, "Bash", {"command": f"uniq {p}"}) is None
+    assert hook(env, "Bash", {"command": f"sort {p} | uniq -c"}) is None
+    assert hook(env, "Bash", {"command": f"uniq {p} {env['tmp'] / 'out.txt'}"}) is None
+
+
+def test_cp_install_target_directory_option(env):
+    skill_file(env)
+    d = str(env["claude"] / "skills" / "demo")
+    lock(env)
+    src = str(env["tmp"] / "evil.md")
+    assert hook(env, "Bash", {"command": f"cp -t {d} {src}"})
+    assert hook(env, "Bash", {"command": f"cp --target-directory={d} {src}"})
+    assert hook(env, "Bash", {"command": f"install -t {d} {src}"})
+    assert hook(env, "Bash", {"command": f"cp -rt {d} {src}"})
+    # copying OUT of a zone with -t is still fine
+    assert hook(env, "Bash", {"command": f"cp -t {env['tmp']} {d}/SKILL.md"}) is None
+
+
+def test_pipe_and_loop_writes_into_zone_blocked(env):
+    skill_file(env)
+    skills, md = str(env["claude"] / "skills"), str(env["claude"] / "CLAUDE.md")
+    lock(env)
+    assert hook(env, "Bash", {"command": f"grep -rl hi {skills} | xargs sed -i '' s/hi/yo/"})
+    assert hook(env, "Bash", {"command": f"echo {md} | xargs rm"})
+    assert hook(env, "Bash", {"command": f"find {skills} -name SKILL.md | xargs perl -pi -e s/a/b/"})
+    assert hook(env, "Bash", {"command": f"for f in {skills}/*/SKILL.md; do sed -i '' s/a/b/ \"$f\"; done"})
+    assert hook(env, "Bash", {"command": f"rm $(grep -rl hi {skills})"})
+    assert hook(env, "Bash", {"command": f"for f in {skills}/*/SKILL.md; do mytool \"$f\"; done"})
+
+
+def test_pipe_and_loop_reads_still_pass(env):
+    p = skill_file(env)
+    skills = str(env["claude"] / "skills")
+    out = str(env["tmp"] / "out.txt")
+    lock(env)
+    for cmd in [f"cat {p} | grep name",
+                f"grep -rl hi {skills} | head -5",
+                f"find {skills} -name SKILL.md | wc -l",
+                f"grep -rl hi {skills} | xargs wc -l",
+                f"find {skills} -name '*.md' | xargs grep -n name",
+                f"ls {skills} | sort | uniq",
+                f"for f in {skills}/*/SKILL.md; do head -3 \"$f\"; done",
+                f"grep -h name {skills}/*/SKILL.md | sort > {out}",
+                f"git -C {skills} status && git -C {skills} log -1"]:
+        assert hook(env, "Bash", {"command": cmd}) is None, cmd
