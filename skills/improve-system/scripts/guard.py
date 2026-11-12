@@ -15,6 +15,9 @@ Fails closed:
 - a Bash command that mentions a protected zone only passes if it is a read, the run of an audited
   self-improve script, or a write to a released path. Inline interpreters (python -c, node -e, awk,
   perl...), redirects to a variable and paths that can't be resolved = block.
+- the command is judged as a whole too: when one part names a protected zone and ANOTHER part writes
+  (xargs with a writer, sed -i, perl -i, rm, mv, cp, tee, dd, truncate..., or a variable that can't be
+  resolved), the whole command is blocked: `grep -rl x ZONE | xargs sed -i`, `for f in ZONE; do rm "$f"`.
 - code typed into a command (python3 -c, node -e, bash -c, heredoc or pipe into an interpreter) is blocked
   during a run even without a protected path in it: it can build the path at run time. Option
   allow_inline_code = 1 switches this off.
@@ -48,6 +51,14 @@ READONLY = {"ls", "cat", "head", "tail", "grep", "egrep", "fgrep", "rg", "wc", "
 OUT_OPT = {"sort": re.compile(r"^(-o|--output)(=|$)|^-o\S"), "tree": re.compile(r"^-o(=|$|\S)"),
            "less": re.compile(r"^(-o|-O|--log-file|--LOG-FILE)(=|$|\S)"), "more": re.compile(r"^(-o|-O)(=|$|\S)")}
 GIT_RO = {"status", "diff", "log", "show", "blame", "ls-files", "rev-parse"}
+# programs that write/delete files. Used across segments: `grep -rl x ZONE | xargs sed -i`, `for f in ZONE; do rm "$f"`
+WRITERS = {"rm", "rmdir", "unlink", "mv", "cp", "tee", "dd", "truncate", "ln", "install", "rsync", "ditto", "scp",
+           "shred", "touch", "chmod", "chown", "patch"}
+# options of xargs/parallel that take a value as the next word
+XARGS_VAL = {"-I", "-J", "-n", "-P", "-L", "-s", "-d", "-E", "-a", "-R", "-S", "--delimiter", "--arg-file",
+             "--max-args", "--max-procs", "--max-lines", "--replace"}
+# programs whose destination is one argument (the others are sources): only it is checked
+DEST_ONLY = ("cp", "rsync", "install", "ln", "ditto", "scp", "uniq")
 INTERP = {"python", "python3", "bash", "sh", "zsh", "node", "ruby", "perl", "osascript"}
 PREFIX = {"sudo", "env", "command", "time", "nohup", "exec", "caffeinate"}
 
@@ -239,6 +250,89 @@ def inline_code(prog, args):
     return None
 
 
+def uniq_operands(args):
+    """Positional operands of uniq (INPUT [OUTPUT]); skips the values of -f/-s/-w."""
+    out, skip = [], False
+    for a in args:
+        if skip:
+            skip = False
+        elif a in ("-f", "-s", "-w"):
+            skip = True
+        elif a == "-" or not a.startswith("-"):
+            out.append(a)
+    return out
+
+
+def dest_args(prog, args):
+    """(destinations, sources) for a program in DEST_ONLY."""
+    if prog == "uniq":
+        ops = uniq_operands(args)
+        return [o for o in ops[1:2] if o != "-"], ops[:1]
+    if prog in ("cp", "install", "ln", "mv"):  # -t DIR / --target-directory=DIR (GNU): DIR is the destination
+        tgt, rest, i = None, [], 0
+        while i < len(args):
+            a = args[i]
+            if a.startswith("--target-directory="):
+                tgt = a.split("=", 1)[1]
+            elif a == "--target-directory" or re.match(r"^-[A-Za-z]*t$", a):
+                tgt = args[i + 1] if i + 1 < len(args) else ""
+                i += 1
+            elif re.match(r"^-t.+", a):
+                tgt = a[2:]
+            elif not a.startswith("-"):
+                rest.append(a)
+            i += 1
+        if tgt is not None:
+            return [tgt], rest
+    plain = [a for a in args if not a.startswith("-")]
+    return plain[-1:], plain[:-1]
+
+
+def ro_prog(prog, args):
+    """True when this program call only reads (the read-only forms the guard lets through)."""
+    if prog in READONLY:
+        if prog == "uniq":
+            return len(uniq_operands(args)) < 2
+        return not (prog in OUT_OPT and any(OUT_OPT[prog].match(a) for a in args))
+    if prog == "sed":
+        return not any(a.startswith("-i") or a == "--in-place" for a in args) and \
+            not any(re.search(r"(^|[;{}\s/])[wWe](\s|$)", a) for a in args)
+    if prog == "find":
+        return not any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls")
+                       for a in args)
+    if prog == "git":
+        ga = list(args)
+        while ga and ga[0] in ("-C", "-c", "--git-dir", "--work-tree"):
+            ga = ga[2:]
+        return bool(ga and ga[0] in GIT_RO)
+    return False
+
+
+def seg_writes(prog, args):
+    """Why this segment can write files whose names come from ANOTHER segment (stdin, loop variable,
+    $(...)), or None. A pipe/loop that names a zone is denied when another segment writes."""
+    if prog in ("xargs", "parallel"):
+        i = 0
+        while i < len(args) and args[i].startswith("-"):
+            i += 2 if args[i] in XARGS_VAL else 1
+        inner = args[i:]
+        while inner and (re.match(r"^[A-Za-z_]\w*=", inner[0]) or inner[0] in PREFIX):
+            inner = inner[1:]
+        if not inner:
+            return None  # bare xargs = echo
+        ip = os.path.basename(inner[0])
+        return None if ro_prog(ip, inner[1:]) else f"`{prog} {ip}`"
+    if prog in WRITERS:
+        return f"`{prog}`"
+    if prog == "sed" and not ro_prog(prog, args):
+        return "`sed -i`"
+    if prog == "perl" and any(re.match(r"^-\w*i", a) for a in args):
+        return "`perl -i`"
+    if not ro_prog(prog, args) and any("$" in a or "`" in a for a in args):
+        return f"`{prog}` with an unresolved variable"
+    return None
+
+
 def check_bash(cmd, cwd, allow):
     """Devolve motivo de bloqueio, ou None."""
     # no shortcut: every command is read during a run (variables and symlinks do not escape)
@@ -258,12 +352,38 @@ def check_bash(cmd, cwd, allow):
     if C.WINDOWS:
         # a backslash is a path separator on Windows: C:\\x\\SKILL.md must be read as a path, not as escapes
         cmd = cmd.replace("\\", "/")
-    for seg in split_segments(cmd):
+    def names_zone(text, words):
+        """True when this segment names a protected zone that is not an exact released path."""
+        left = text
+        for v in words:
+            if v and looks_path(v) and in_zone(resolve(v, cwd)):
+                if not allowed(resolve(v, cwd), allow):
+                    return True
+                left = left.replace(v, "")
+        return bool(MARKERS.search(left))
+
+    def looks_path(v):
+        return v.startswith(("/", "~")) or "/" in v or os.path.exists(resolve(v, cwd)) or \
+               bool(re.search(r"\.\w{1,5}$", v))
+
+    # whole command: a segment that names a zone + ANOTHER segment that writes = the write can get its
+    # path from the first one (pipe into xargs, for-loop variable, $(...)). Checked after the loop.
+    zone_segs, writer_segs = set(), {}
+    for idx, seg in enumerate(split_segments(cmd)):
         seg_s = seg.strip().rstrip(")")
         # loop/condition keywords are not programs: `do python3 x`, `then cp a b`
         seg_s = re.sub(r"^(?:(?:do|then|else|elif|if|while|until|!|\{|\()\s+)+", "", seg_s)
-        if re.match(r"^for\s", seg_s) or seg_s in ("done", "fi", "}", "{"):
-            continue  # `for f in a b c` only lists words; the loop body is checked in its own segment
+        if re.match(r"^(for|select)\s", seg_s):
+            # `for f in a b c` only lists words; the loop body is checked in its own segment
+            try:
+                words = [sub(t) for t in shlex.split(seg_s, comments=False)]
+            except ValueError:
+                words = [sub(t) for t in seg_s.split()]
+            if names_zone(seg_s, words):
+                zone_segs.add(idx)
+            continue
+        if seg_s in ("done", "fi", "}", "{"):
+            continue
         if not seg_s:
             continue
         # redirects deste trecho, resolvidos no cwd atual
@@ -318,38 +438,27 @@ def check_bash(cmd, cwd, allow):
                 vals.append(a)
             elif re.match(r"^-o\S", a):  # -o/x colado
                 vals.append(a[2:])
-        def looks_path(v):
-            return v.startswith(("/", "~")) or "/" in v or os.path.exists(resolve(v, cwd)) or \
-                   bool(re.search(r"\.\w{1,5}$", v))
         zone_args = [v for v in vals if v and looks_path(v) and in_zone(resolve(v, cwd))]
-        writes_out = prog in OUT_OPT and any(OUT_OPT[prog].match(a) for a in args)
+        if names_zone(body, vals):
+            zone_segs.add(idx)
+        w = seg_writes(prog, args)
+        if w:
+            writer_segs[idx] = w
         if not (MARKERS.search(body) or zone_args or in_zone(cwd)):
             continue
         # plain read (no option that writes a file)
-        if prog in READONLY and not writes_out:
+        if ro_prog(prog, args):
             continue
-        if prog == "sed" and not any(a.startswith("-i") or a == "--in-place" for a in args) and \
-                not any(re.search(r"(^|[;{}\s/])[wWe](\s|$)", a) for a in args):
-            continue
-        if prog == "find" and not any(a in ("-delete", "-exec", "-execdir", "-ok", "-okdir", "-fprint", "-fprintf", "-fls")
-                                      for a in args):
-            continue
-        if prog == "git":
-            ga = list(args)
-            while ga and ga[0] in ("-C", "-c", "--git-dir", "--work-tree"):
-                ga = ga[2:]
-            if ga and ga[0] in GIT_RO:
-                continue
         if script and os.path.isfile(script) and in_zone(script):
             return (f"script inside a protected zone ({script}) does not run during an improve-system run: "
                     f"it could write to a skill/wiki without [x]. Run it after `finish`")
         # any other program: every mention of a zone must be a resolvable AND released path
         leftover = body
-        if prog in ("cp", "rsync", "install", "ln", "ditto", "scp"):  # only the destination is written
-            plain = [a for a in args if not a.startswith("-")]
-            for a in plain[:-1]:
+        if prog in DEST_ONLY:  # only the destination is written
+            dests, srcs = dest_args(prog, args)
+            for a in srcs:
                 leftover = leftover.replace(a, "")
-            zone_args = [a for a in plain[-1:] if in_zone(resolve(a, cwd))]
+            zone_args = [a for a in dests if in_zone(resolve(a, cwd))]
         for a in zone_args:
             if not allowed(resolve(a, cwd), allow):
                 return f"`{prog}` touches {resolve(a, cwd)}"
@@ -357,8 +466,12 @@ def check_bash(cmd, cwd, allow):
         if MARKERS.search(leftover):
             return (f"`{prog}` mentions a protected zone in a way that can't be checked "
                     f"(inline interpreter, variable or built-up path)")
-        if in_zone(cwd) and not zone_args and prog not in ("cp", "rsync", "install", "ln", "ditto", "scp"):
+        if in_zone(cwd) and not zone_args and prog not in DEST_ONLY:
             return f"`{prog}` runs inside a protected zone ({cwd}) without a released path"
+    for idx, w in writer_segs.items():
+        if zone_segs - {idx}:
+            return (f"{w} in a command whose other part names a protected zone (pipe into xargs, for-loop, "
+                    f"$(...)): the write can take its path from there")
     return None
 
 
