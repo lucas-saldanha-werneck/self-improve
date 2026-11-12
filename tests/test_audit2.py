@@ -227,7 +227,8 @@ def test_memory_index_auto_still_renders(env):
     (env["state"] / "runs" / rid / "plan.json").write_text(json.dumps([
         {"bucket": "auto", "kind": "memory-index", "title": "t", "target": str(idx)}]), encoding="utf-8")
     run(env, "render", rid)
-    assert os.path.realpath(idx) in (env["state"] / "runs" / rid / "allowed-paths.txt").read_text(encoding="utf-8")
+    allow = (env["state"] / "runs" / rid / "allowed-paths.txt").read_text(encoding="utf-8")
+    assert os.path.realpath(idx).replace("\\", "/") in allow
 
 
 # ---- SI-13: "idle for 2 h" counts from the last activity ----
