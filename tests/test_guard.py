@@ -88,6 +88,9 @@ def test_claude_cannot_abort_young_run(env):
 
 def test_claude_can_abort_old_run(env):
     lock(env, age_s=3 * 3600)
+    rd, old = env["state"] / "runs" / "RX", time.time() - 3 * 3600
+    for p in [rd, *rd.iterdir()]:  # idle = nothing changed in the run folder for 2 h+
+        os.utime(p, (old, old))
     assert hook(env, "Bash", {"command": f"python3 {IS} abort RX"}) is None
 
 
