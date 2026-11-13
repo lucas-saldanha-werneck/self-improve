@@ -1,11 +1,17 @@
 ---
 name: improve-system
 description: 'Use when the user says "/improve-system", "improve system", "improve the system", "self improve", "where did I correct you?", "what did I repeat?", "apply what I marked", "lint the wiki", or asks to turn repeated corrections, repeated tasks, skill friction, wiki contradictions, broken links, stale pages or bloat into a change to a skill, CLAUDE.md, memory, hook or wiki. In one run: applies what the user approved in the previous review, reads what changed since the last run, and sorts each improvement into AUTO / SIGN-OFF / CONTEXT.'
+version: "0.4.7"
 metadata:
   author: Lucas Saldanha Werneck <lucas@2olhares.com>
+  tags: [self-improve, review, memory]
 ---
 
 # improve-system
+
+## Purpose
+
+Find the corrections and tasks the user had to repeat, and sort each fix by risk (AUTO, SIGN-OFF, CONTEXT), so that setup defects get fixed instead of repeated.
 
 A correction the user has to make twice is a defect of the setup, not of the conversation. This skill finds
 those defects (in sessions, skills, config and an optional wiki) and sorts each fix by risk.
@@ -102,6 +108,37 @@ PreToolUse hook (`scripts/guard.py`) enforces this while a run is active, **in e
 - Editing a plugin skill or a linked skill. The next update wipes the edit.
 - Treating `[ ]` as rejection. `[ ]` = not decided yet; it comes back in the new review.
 - Leaving a run open. The lock does not expire: without `finish`/`abort`, no session can edit skills/wiki/config. A line with an id but an unreadable checkbox becomes pending and shows in `review-warnings.json`: tell the user.
+
+## Available Scripts
+
+| Script | Purpose | Arguments |
+|---|---|---|
+| `improve_system.py status` | Print the run history and where reviews go | none |
+| `improve_system.py start` | Open a run and read what changed since the last run | `--since`, `--days`, `--force`, `--full-wiki`, `--apply-only` |
+| `improve_system.py render` | Render the plan into the review files | `<run_id>` |
+| `improve_system.py backup` | Back up a file before an edit | `<run_id> <path>` |
+| `improve_system.py intent` | Record the target's hash before a manual edit | `<run_id> --id --target` |
+| `improve_system.py apply-patch` | Apply an item's exact old/new patch with backup and log | `<run_id> --id` |
+| `improve_system.py log` | Log an applied change | `<run_id> --id --target --summary` |
+| `improve_system.py finish` | Close the run | `<run_id>`, `--note` |
+| `improve_system.py abort` | Abort a run and release the lock | `<run_id>`, `--note` |
+| `improve_system.py wait-lock` | Wait until `start` may run | `--max-minutes`, `--every` |
+| `improve_system.py notify` | Send one line through `notify_command` | `<text>` |
+
+## Prerequisites
+
+- python3 3.9+ (standard library only) and the self-improve plugin enabled.
+- An optional wiki and a settings file; everything works without configuration.
+
+## Limitations
+
+- While a run is open, a guard blocks writes to skills, config, memory and review files, except the files the run released. It is a guardrail, not a sandbox.
+- Skills, structural wiki changes and config change only with [x] from the user, whatever the size.
+
+## Troubleshooting
+
+- Error: a run left open keeps the lock, and no session can edit skills, wiki or config. Close it with finish or abort.
+- A line with an id but an unreadable checkbox becomes pending and shows in `review-warnings.json`: tell the user.
 
 ## Examples
 
