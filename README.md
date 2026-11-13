@@ -1,5 +1,9 @@
 # self-improve
 
+[![CI](https://github.com/lucas-saldanha-werneck/self-improve/actions/workflows/test.yml/badge.svg)](https://github.com/lucas-saldanha-werneck/self-improve/actions/workflows/test.yml)
+[![License](https://img.shields.io/github/license/lucas-saldanha-werneck/self-improve)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.4.6-blue)](CHANGELOG.md)
+
 A Claude Code plugin that reads your recent sessions, finds the places where you had to correct Claude more than once, and turns each one into a proposed change to your `CLAUDE.md`, skills or memory files. Small safe fixes are applied right away. Anything that changes how Claude behaves waits for your OK, and only what you approve is applied.
 
 If you keep telling Claude the same thing ("run the tests first", "don't ask, just do it"), the rule is either missing or not strong enough. This plugin finds those repeats so you fix them once.
@@ -194,3 +198,7 @@ The idea, the skill name and the three buckets (auto-approve, sign-off, needs co
 MIT. See [LICENSE](LICENSE).
 
 Built with Claude Code
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for what this plugin accesses and how to report a vulnerability.
