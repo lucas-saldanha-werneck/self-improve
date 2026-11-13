@@ -6,6 +6,7 @@
 [![execute-reviewed score](https://img.shields.io/badge/execute--reviewed%20score-96.5%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator)
 [![human-review score](https://img.shields.io/badge/human--review%20score-91.5%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator)
 [![improve-system score](https://img.shields.io/badge/improve--system%20score-95.2%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator)
+[![plugin score (proposal)](https://img.shields.io/badge/plugin%20score%20(proposal)-93.8%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator/issues/508)
 
 A Claude Code plugin that reads your recent sessions, finds the places where you had to correct Claude more than once, and turns each one into a proposed change to your `CLAUDE.md`, skills or memory files. Small safe fixes are applied right away. Anything that changes how Claude behaves waits for your OK, and only what you approve is applied.
 
