@@ -1,6 +1,8 @@
 ---
 name: improve-system
 description: 'Use when the user says "/improve-system", "improve system", "improve the system", "self improve", "where did I correct you?", "what did I repeat?", "apply what I marked", "lint the wiki", or asks to turn repeated corrections, repeated tasks, skill friction, wiki contradictions, broken links, stale pages or bloat into a change to a skill, CLAUDE.md, memory, hook or wiki. In one run: applies what the user approved in the previous review, reads what changed since the last run, and sorts each improvement into AUTO / SIGN-OFF / CONTEXT.'
+metadata:
+  author: Lucas Saldanha Werneck <lucas@2olhares.com>
 ---
 
 # improve-system
@@ -12,6 +14,15 @@ Script: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/improve-system/scripts/improve_sy
 `status`, `start`, `render`, `backup`, `intent`, `apply-patch`, `log`, `finish`, `abort`, `notify`.
 `IS status` prints where the state and the review files live (default `~/.claude/self-improve/` and
 `~/.claude/self-improve/reviews/`: `review-YYYY-MM-DD.md`, `needs-context-YYYY-MM-DD.md`, `change-log.md`).
+
+## Instructions
+
+1. `IS status`, then `IS start`: open the run and read the sessions since the last run.
+2. Sort each finding into AUTO, SIGN-OFF or CONTEXT (when in doubt, the safer bucket).
+3. Apply only the AUTO kinds; write SIGN-OFF items to `review-*.md` and CONTEXT questions to `needs-context-*.md`.
+4. `IS render` and `IS finish`; report in the chat output format below.
+
+The steps below are the full procedure.
 
 ## The 3 buckets
 
@@ -91,3 +102,9 @@ PreToolUse hook (`scripts/guard.py`) enforces this while a run is active, **in e
 - Editing a plugin skill or a linked skill. The next update wipes the edit.
 - Treating `[ ]` as rejection. `[ ]` = not decided yet; it comes back in the new review.
 - Leaving a run open. The lock does not expire: without `finish`/`abort`, no session can edit skills/wiki/config. A line with an id but an unreadable checkbox becomes pending and shows in `review-warnings.json`: tell the user.
+
+## Examples
+
+- The user types `/self-improve:improve-system` (or "improve the system"): one run reads recent sessions, applies the safe fixes and writes the review files.
+- The user asks "where did I correct you?" or "what did I repeat?": the same run, answered from the findings.
+- The user asks "apply what I marked": the run applies the items marked `[x]` in the last review.

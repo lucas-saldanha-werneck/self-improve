@@ -2,6 +2,8 @@
 name: human-review
 description: Use when the user says "/human-review", "human review", "review the improve-system items", "what is waiting for me to decide?", "I want to approve the review items", or when the session opens with "/self-improve:human-review answer" (opened by the end of an improve-system run). Shows each SIGN-OFF and CONTEXT item as buttons (AskUserQuestion) and records the choices in the review-*.md / needs-context-*.md files. It does NOT apply anything; at the end it hands the approved items to execute-reviewed.
 argument-hint: "[answer|open]"
+metadata:
+  author: Lucas Saldanha Werneck <lucas@2olhares.com>
 ---
 
 # human-review: decide the improve-system items with buttons
@@ -15,6 +17,15 @@ leave the guard lock stuck or apply something twice. A decision recorded on the 
 runs as its own step.
 
 Script: `python3 "${CLAUDE_PLUGIN_ROOT}/skills/human-review/scripts/human_review.py"` (written `HR` below): `items`, `mark`, `launch`.
+
+## Instructions
+
+1. `HR items` lists what is waiting (SIGN-OFF and CONTEXT).
+2. Show each item as a short card with buttons (`AskUserQuestion`, up to 4 per call).
+3. Record each choice with `HR mark`; apply nothing.
+4. If something was approved, hand over to `execute-reviewed` with `HR launch`.
+
+The sections below give the modes and the card rules.
 
 ## Modes
 
@@ -65,3 +76,9 @@ Example:
 - `launch_command` is any program that opens a Claude Code session; `{name}` and `{prompt}` in it are replaced (example in the README). It should open the session without stealing focus.
 - `launch` does not open a second `REVIEW …` (or `EXEC …`) session if `claude agents --json` lists one already.
 - CONTEXT answers don't become changes here nor in execute-reviewed: the next improve-system run picks the bucket.
+
+## Examples
+
+- The user types `/human-review` (or "what is waiting for me to decide?"): each waiting item appears as a card with Apply, Reject or Later; choices are written to the review files.
+- The session opens by itself with `/self-improve:human-review answer` after an improve-system run: the same flow, in that session.
+- Nothing is waiting: Claude says "nothing waiting for you" and stops.

@@ -1,6 +1,8 @@
 ---
 name: execute-reviewed
 description: Use when the user says "/execute-reviewed", "execute reviewed", "apply what I approved", "apply the approved review items", or when the session opens by itself with "/self-improve:execute-reviewed" (started by human-review right after the user's answers). Applies the SIGN-OFF items the user approved in human-review (review-*.md with [x]), with backup, check and change log, in an --apply-only run of improve-system. Decides nothing and asks nothing.
+metadata:
+  author: Lucas Saldanha Werneck <lucas@2olhares.com>
 ---
 
 # execute-reviewed: apply what the user approved
@@ -11,6 +13,14 @@ may run with nobody watching: it does not ask, does not widen the scope, and app
 
 - `IS` = `python3 "${CLAUDE_PLUGIN_ROOT}/skills/improve-system/scripts/improve_system.py"`
 - `HR` = `python3 "${CLAUDE_PLUGIN_ROOT}/skills/human-review/scripts/human_review.py"`
+
+## Instructions
+
+1. `HR items`; if nothing is approved, stop.
+2. `IS start --apply-only`, then apply each approved item (`apply-patch` or backup, edit, check, log).
+3. `IS render` and `IS finish` (or `abort` on an error that prevents finishing).
+
+The Flow section below has the details and the exit codes.
 
 ## Flow
 
@@ -41,3 +51,9 @@ may run with nobody watching: it does not ask, does not widen the scope, and app
 - Only `[x]`. No `[x]`, no change, not even "it's small".
 - One execution at a time: `HR launch --exec` does not open another `EXEC …` session if one is already listed.
 - CONTEXT answers are not this skill's job: the next improve-system run picks the bucket.
+
+## Examples
+
+- The user types `/execute-reviewed` (or "apply what I approved"): the items marked `[x]` are applied with a backup and a change log entry; nothing else is touched.
+- The session opens by itself with `/self-improve:execute-reviewed` right after the user's answers in human-review: same flow, no questions.
+- No item is approved: Claude replies "nothing approved to apply" and stops.
