@@ -6,6 +6,16 @@
 
 A Claude Code plugin that reads your recent sessions, finds the places where you had to correct Claude more than once, and turns each one into a proposed change to your `CLAUDE.md`, skills or memory files. Small safe fixes are applied right away. Anything that changes how Claude behaves waits for your OK, and only what you approve is applied.
 
+[![self-improve demo: tap to open the video](https://github.com/user-attachments/assets/53b9252c-819b-4df3-b441-3e07a8ac9aa9)](https://lucas-saldanha-werneck.github.io/self-improve/demo.mp4)
+
+<table>
+<tr>
+<td align="center"><img src="https://github.com/user-attachments/assets/e70b0e3f-13b9-4d6b-9f56-b37f84d26321" alt="Small safe fixes are applied right away" width="320"><br>Small safe fixes are applied right away</td>
+<td align="center"><img src="https://github.com/user-attachments/assets/dc388c9c-c2bd-40ce-b40b-8d21c04bbe32" alt="You decide the rest with buttons" width="320"><br>You decide the rest with buttons</td>
+<td align="center"><img src="https://github.com/user-attachments/assets/5e0f2949-2bc8-4ff9-8299-56a1d64fa0cc" alt="Backup and change log kept" width="320"><br>Backup and change log kept</td>
+</tr>
+</table>
+
 If you keep telling Claude the same thing ("run the tests first", "don't ask, just do it"), the rule is either missing or not strong enough. This plugin finds those repeats so you fix them once.
 
 ## What you see
