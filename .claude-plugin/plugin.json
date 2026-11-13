@@ -1,6 +1,6 @@
 {
   "name": "self-improve",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "Finds where you corrected Claude more than once and proposes the fix for your OK.",
   "author": {
     "name": "Lucas Saldanha Werneck",

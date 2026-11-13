@@ -1,11 +1,17 @@
 ---
 name: execute-reviewed
 description: Use when the user says "/execute-reviewed", "execute reviewed", "apply what I approved", "apply the approved review items", or when the session opens by itself with "/self-improve:execute-reviewed" (started by human-review right after the user's answers). Applies the SIGN-OFF items the user approved in human-review (review-*.md with [x]), with backup, check and change log, in an --apply-only run of improve-system. Decides nothing and asks nothing.
+version: "0.4.7"
 metadata:
   author: Lucas Saldanha Werneck <lucas@2olhares.com>
+  tags: [review, apply, self-improve]
 ---
 
 # execute-reviewed: apply what the user approved
+
+## Purpose
+
+Apply, with backup, check and change log, only the improve-system items the user approved with [x] in human-review.
 
 The "do" half of the pair human-review (decide) → execute-reviewed (apply). It runs in a separate `EXEC DD-MM`
 session when the option `launch_command` is set, or in the current session when the user asks for it. It
@@ -51,6 +57,21 @@ The Flow section below has the details and the exit codes.
 - Only `[x]`. No `[x]`, no change, not even "it's small".
 - One execution at a time: `HR launch --exec` does not open another `EXEC …` session if one is already listed.
 - CONTEXT answers are not this skill's job: the next improve-system run picks the bucket.
+
+## Prerequisites
+
+- python3 3.9+ (standard library only) and the self-improve plugin enabled.
+- Review files from human-review with at least one item marked [x]; the improve-system script does the apply run.
+
+## Limitations
+
+- It decides nothing and asks nothing: no [x], no change.
+- One execution at a time; CONTEXT answers are not handled here (the next improve-system run picks the bucket).
+
+## Troubleshooting
+
+- An item shows `possibly_applied: true`: an earlier session died after recording the intent and before the log. Do not apply it again; open the target first (step 3 of the Flow).
+- Another EXEC session is already listed: the launch command does not open a second one; wait for it.
 
 ## Examples
 

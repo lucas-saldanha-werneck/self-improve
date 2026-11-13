@@ -2,6 +2,10 @@
 
 All notable changes to this plugin. Versions follow `.claude-plugin/plugin.json`.
 
+## 0.4.7 (2026-11-13)
+
+- Skill schema and score: version and tags in the frontmatter, third-person descriptions, Purpose, Prerequisites, Limitations, Troubleshooting and script tables in the skills; skill score badges.
+
 ## 0.4.6 (2026-11-13)
 
 - Add author metadata, Instructions and Examples sections to the skills.

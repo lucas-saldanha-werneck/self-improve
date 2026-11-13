@@ -2,7 +2,10 @@
 
 [![CI](https://github.com/lucas-saldanha-werneck/self-improve/actions/workflows/test.yml/badge.svg)](https://github.com/lucas-saldanha-werneck/self-improve/actions/workflows/test.yml)
 [![License](https://img.shields.io/github/license/lucas-saldanha-werneck/self-improve)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.4.6-blue)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.7-blue)](CHANGELOG.md)
+[![execute-reviewed score](https://img.shields.io/badge/execute--reviewed%20score-96.5%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator)
+[![human-review score](https://img.shields.io/badge/human--review%20score-91.5%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator)
+[![improve-system score](https://img.shields.io/badge/improve--system%20score-95.2%20A-brightgreen)](https://github.com/NVIDIA/SkillEvaluator)
 
 A Claude Code plugin that reads your recent sessions, finds the places where you had to correct Claude more than once, and turns each one into a proposed change to your `CLAUDE.md`, skills or memory files. Small safe fixes are applied right away. Anything that changes how Claude behaves waits for your OK, and only what you approve is applied.
 

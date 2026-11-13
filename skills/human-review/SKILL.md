@@ -2,11 +2,17 @@
 name: human-review
 description: Use when the user says "/human-review", "human review", "review the improve-system items", "what is waiting for me to decide?", "I want to approve the review items", or when the session opens with "/self-improve:human-review answer" (opened by the end of an improve-system run). Shows each SIGN-OFF and CONTEXT item as buttons (AskUserQuestion) and records the choices in the review-*.md / needs-context-*.md files. It does NOT apply anything; at the end it hands the approved items to execute-reviewed.
 argument-hint: "[answer|open]"
+version: "0.4.7"
 metadata:
   author: Lucas Saldanha Werneck <lucas@2olhares.com>
+  tags: [review, decisions, self-improve]
 ---
 
 # human-review: decide the improve-system items with buttons
+
+## Purpose
+
+Turn each SIGN-OFF and CONTEXT item of improve-system into a card with buttons and record the decision, so the user can decide from a phone without opening files.
 
 `improve-system` puts what needs the user in `review-*.md` (SIGN-OFF) and `needs-context-*.md` (CONTEXT). The
 user may be on a phone and not want to open files. This skill turns each item into a card with buttons and
@@ -76,6 +82,30 @@ Example:
 - `launch_command` is any program that opens a Claude Code session; `{name}` and `{prompt}` in it are replaced (example in the README). It should open the session without stealing focus.
 - `launch` does not open a second `REVIEW …` (or `EXEC …`) session if `claude agents --json` lists one already.
 - CONTEXT answers don't become changes here nor in execute-reviewed: the next improve-system run picks the bucket.
+
+## Available Scripts
+
+| Script | Purpose | Arguments |
+|---|---|---|
+| `human_review.py items` | List the pending SIGN-OFF and CONTEXT items | none |
+| `human_review.py mark` | Record the user's decision for one item | `--file`, `--ref`, `--choice`, `--note`, `--answer` |
+| `human_review.py launch` | Open the review session (or, with `--exec`, the apply session) through `launch_command` | `--exec`, `--dry-run` |
+
+## Prerequisites
+
+- python3 3.9+ (standard library only) and the self-improve plugin enabled.
+- Review files written by an improve-system run. Opening a separate session needs the `launch_command` option.
+
+## Limitations
+
+- It only records decisions; it applies nothing. Approved items go to execute-reviewed.
+- An unchecked item means not decided yet, not rejected; it returns in the next review.
+- The session that runs improve-system cannot mark items; only the user decides them.
+
+## Troubleshooting
+
+- A line with an id but an unreadable checkbox becomes pending and shows in `review-warnings.json`: tell the user.
+- A REVIEW session is already listed by claude agents: launch does not open a second one.
 
 ## Examples
 
