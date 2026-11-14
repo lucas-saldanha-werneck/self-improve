@@ -1,7 +1,7 @@
 ---
 name: execute-reviewed
 description: Use when the user says "/execute-reviewed", "execute reviewed", "apply what I approved", "apply the approved review items", or when the session opens by itself with "/self-improve:execute-reviewed" (started by human-review right after the user's answers). Applies the SIGN-OFF items the user approved in human-review (review-*.md with [x]), with backup, check and change log, in an --apply-only run of improve-system. Decides nothing and asks nothing.
-version: "0.4.7"
+version: "0.4.8"
 metadata:
   author: Lucas Saldanha Werneck <lucas@2olhares.com>
   tags: [review, apply, self-improve]
@@ -51,6 +51,7 @@ The Flow section below has the details and the exit codes.
 6. An error that prevents finishing → `IS abort <run_id>` (the lock never expires and blocks skill/wiki/config edits in every session). If the guard denies the abort, say so: the user runs `IS abort <run_id>` in their own terminal.
 7. **Final notice**: `IS notify "Applied: S01, S03. Became new items: S02 (target changed)."` (no-op without `notify_command`; a `PushNotification` tool, if available, works too). An apply-only run does not open a review by itself: if there was a 3.5 item, add "run /self-improve:human-review".
 8. Final reply = the same line, plus the path of `change-log.md` (from `IS status`).
+9. **Close the session** (last action, after the reply): if this session was opened by `launch_command` in tmux (name `claude-EXEC-…`), run `claude-close-self` when it exists on PATH (`command -v claude-close-self`); otherwise skip silently. It only closes a tmux session whose name is allowed and does nothing outside tmux.
 
 ## Rules
 

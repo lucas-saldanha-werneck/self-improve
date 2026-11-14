@@ -2,6 +2,10 @@
 
 All notable changes to this plugin. Versions follow `.claude-plugin/plugin.json`.
 
+## 0.4.8 (2026-11-14)
+
+- human-review and execute-reviewed: as a last step, sessions opened by `launch_command` in tmux close themselves with `claude-close-self` (skipped when the command is missing, outside tmux, or a question is still open).
+
 ## 0.4.7 (2026-11-13)
 
 - Skills: version and tags in the frontmatter, third-person descriptions, Purpose, Prerequisites, Limitations, Troubleshooting and script tables; skill score badges.

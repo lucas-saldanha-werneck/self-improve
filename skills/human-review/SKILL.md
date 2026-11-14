@@ -2,7 +2,7 @@
 name: human-review
 description: Use when the user says "/human-review", "human review", "review the improve-system items", "what is waiting for me to decide?", "I want to approve the review items", or when the session opens with "/self-improve:human-review answer" (opened by the end of an improve-system run). Shows each SIGN-OFF and CONTEXT item as buttons (AskUserQuestion) and records the choices in the review-*.md / needs-context-*.md files. It does NOT apply anything; at the end it hands the approved items to execute-reviewed.
 argument-hint: "[answer|open]"
-version: "0.4.7"
+version: "0.4.8"
 metadata:
   author: Lucas Saldanha Werneck <lucas@2olhares.com>
   tags: [review, decisions, self-improve]
@@ -60,6 +60,7 @@ The sections below give the modes and the card rules.
    - It printed `exec: opened …` → a separate session applies the items now. Reply (1-3 lines): "Recorded: N apply, N reject, N later, N answers. Applying now in the EXEC session."
    - It printed `No launch_command configured` → reply with the counts and "Say *apply what I approved* to apply them here, or run `/self-improve:execute-reviewed` later." If the user then asks, run the execute-reviewed skill in this same session.
    No Apply: "Recorded; nothing to apply." This skill never applies anything by itself.
+6. **Close the session** (last action, after the reply): only when this session was opened by `launch_command` in tmux (name `claude-REVIEW-…`), the reply above is sent, nothing is waiting for the user's answer (no open question, no pending `AskUserQuestion`) and either `exec: opened …` was printed or there was nothing to apply. Run `claude-close-self` if it exists on PATH (`command -v claude-close-self`); otherwise skip silently. Do not close in the `No launch_command configured` branch while the user may still ask to apply here.
 
 ## How to write the card (plain, short)
 
