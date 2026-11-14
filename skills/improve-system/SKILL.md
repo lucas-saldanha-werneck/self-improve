@@ -1,7 +1,7 @@
 ---
 name: improve-system
 description: 'Use when the user says "/improve-system", "improve system", "improve the system", "self improve", "where did I correct you?", "what did I repeat?", "apply what I marked", "lint the wiki", or asks to turn repeated corrections, repeated tasks, skill friction, wiki contradictions, broken links, stale pages or bloat into a change to a skill, CLAUDE.md, memory, hook or wiki. In one run: applies what the user approved in the previous review, reads what changed since the last run, and sorts each improvement into AUTO / SIGN-OFF / CONTEXT.'
-version: "0.4.7"
+version: "0.4.8"
 metadata:
   author: Lucas Saldanha Werneck <lucas@2olhares.com>
   tags: [self-improve, review, memory]
